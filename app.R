@@ -17,7 +17,8 @@ required_packages <- c(
   "dplyr",
   "shinycssloaders",
   "blastula",
-  "glue"
+  "glue",
+  "shinyjs"
 )
 
 # Install missing packages
@@ -1585,13 +1586,13 @@ ui <- function(request) {
           uiOutput("file_status_ui"),
           # Session info
           uiOutput("session_info_ui"),
-          tags$p(
-            "Note metadata: must have",
-            tags$code("label"),
-            "and",
-            tags$code("group"),
-            "columns"
-          ),
+          # tags$p(
+          #   "Note metadata: must have",
+          #   tags$code("label"),
+          #   "and",
+          #   tags$code("group"),
+          #   "columns"
+          # ),
           hr(),
           conditionalPanel(
             condition = "output.file_uploaded",
@@ -1743,10 +1744,14 @@ server <- function(input, output, session) {
         
         removeNotification("loading_session")
         showNotification(
-          "Session loaded successfully! All edits preserved.",
+          "Session loaded successfully!",
           type = "message"
         )
-        updateNavbarPage(session, "main_tabs", selected = "editor")
+        # Add these 3 lines here ↓
+        shinyjs::runjs('
+        $("a[data-value=\'editor\']").click();
+        ')
+        
         
         # Track session load
         track_change(
@@ -1767,27 +1772,28 @@ server <- function(input, output, session) {
   
   # Start new session
   observeEvent(input$start_new, {
-    # Generate a new session ID
+    cat("=== START NEW SESSION CLICKED ===\n")
+    
     new_session_id <- paste0(
       "session_",
       format(Sys.time(), "%Y%m%d_%H%M%S"),
       "_",
       sample(1000:9999, 1)
     )
+    
     uploaded_files$session_id <- new_session_id
     current_session_id(new_session_id)
     
-    # # Clear any existing data
-    # data_rv$meta <- NULL
-    # data_rv$orig_meta <- NULL
-    # data_rv$counts <- NULL
-    # data_rv$orig_counts <- NULL
-    # uploaded_files$file_data <- NULL
-    # uploaded_files$current_edits <- NULL
-    
     showNotification("Starting new session...", type = "message")
-    updateNavbarPage(session, "main_tabs", selected = "editor")
+    
+    # Direct JavaScript to click the Upload/Rename tab
+    shinyjs::runjs('
+    $("a[data-value=\'editor\']").click();
+  ')
+    
+    cat("Tab clicked via JS\n")
   })
+  
   
   # File status UI
   output$file_status_ui <- renderUI({
@@ -2057,14 +2063,21 @@ server <- function(input, output, session) {
   #   updateNavbarPage(session, "main_tabs", selected = "editor")
   # })
   
-  observe({
-    if (!is.null(data_rv$meta)) {
-      updateTabsetPanel(session, "main_tabs", selected = "editor")
-      shinyjs::disable(selector = "a[data-value='help']")
-    } else {
-      shinyjs::enable(selector = "a[data-value='help']")
-    }
-  })
+  # observe({
+  #   if (!is.null(data_rv$meta)) {
+  #     updateTabsetPanel(session, "main_tabs", selected = "editor")
+  #     shinyjs::disable(selector = "a[data-value='help']")
+  #   } else {
+  #     shinyjs::enable(selector = "a[data-value='help']")
+  #   }
+  # })
+  
+  
+  counts_rv <- reactiveValues(
+    counts = NULL,
+    orig_counts = NULL
+  )
+  
   
   output$tables_ui <- renderUI({
     req(data_rv$meta, data_rv$counts)
