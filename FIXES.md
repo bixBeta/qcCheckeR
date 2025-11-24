@@ -1,453 +1,401 @@
-# Resizable PCA Plots with Fixed Aspect Ratio
+# Final UI/UX Improvements
 
-## Changes Made
+## Summary of Changes
 
-### ✅ 1. Added shinyjqui Package
-New dependency for jQuery UI functionality in Shiny.
-
-### ✅ 2. PCA Score Plot - Fully Resizable
-Users can now resize the PCA score plot to any dimensions by dragging the resize handle in the bottom-right corner.
-
-### ✅ 3. Scree Plot - Constrained 4:9 Aspect Ratio
-The scree plot maintains a **4:9 ratio** (height:width = 4:9, or width is 2.25x height) while being resizable.
-
-### ✅ 4. Enhanced Visual Feedback
-Added custom styling for resize handles with hover effects.
+1. ✅ **Removed plot dimensions display** - Hid Plotly toolbar
+2. ✅ **Removed blue highlights** - Changed to subtle gray resize handles
+3. ✅ **PCA Score Plot only resizable** - Scree plot is now fixed size
+4. ✅ **Fixed height filling** - Plot now properly fills card height
+5. ✅ **Added progress bars** - Save and load operations show progress
 
 ---
 
-## Technical Implementation
+## 1. Removed Plot Dimensions Display
 
-### Package Addition
+### What Was Removed:
+The Plotly modebar that showed plot dimensions in bottom-right corner.
 
-```r
-required_packages <- c(
-  ...
-  "shinyjqui"
-)
-```
-
-### PCA Score Plot (Fully Resizable)
-
-```r
-card_body(
-  shinyjqui::jqui_resizable(
-    withSpinner(
-      plotlyOutput("pca_plot", height = "600px"),
-      type = 4,
-      color = "#0dcaf0"
-    )
-  )
-)
-```
-
-**Features:**
-- ✅ Resize freely in any direction
-- ✅ Minimum size: 300px × 200px
-- ✅ No aspect ratio constraint
-- ✅ Drag handle in bottom-right corner
-
-### Scree Plot (Fixed 4:9 Aspect Ratio)
-
-```r
-card_body(
-  shinyjqui::jqui_resizable(
-    withSpinner(
-      plotlyOutput("pca_scree", height = "400px"),
-      type = 4,
-      color = "#0dcaf0"
-    ),
-    options = list(
-      aspectRatio = 9/4  # Width:Height = 9:4
-    )
-  )
-)
-```
-
-**Features:**
-- ✅ Maintains 4:9 ratio (height:width)
-- ✅ Resize by dragging handle
-- ✅ Width automatically adjusts to maintain ratio
-- ✅ Ideal for horizontal scree plot visualization
-
-**Why 4:9 ratio?**
-- Wide format suits scree plots (showing many PCs horizontally)
-- Width = 2.25 × Height (e.g., 400px high = 900px wide)
-- Optimal for displaying 10-20 principal components
-
----
-
-## CSS Styling
-
-### Resize Handle Styling
-
-```css
-/* Base resize handle */
-.ui-resizable-handle {
-  background-color: #0dcaf0;
-  opacity: 0.3;
-  transition: opacity 0.2s;
-}
-
-/* Hover effect */
-.ui-resizable-handle:hover {
-  opacity: 0.6;
-}
-
-/* Corner handle (bottom-right) */
-.ui-resizable-se {
-  width: 12px;
-  height: 12px;
-  right: 1px;
-  bottom: 1px;
-  background-color: #0dcaf0;
-  border-radius: 0 0 4px 0;
-}
-
-/* Bottom edge handle */
-.ui-resizable-s {
-  height: 8px;
-  bottom: 1px;
-}
-
-/* Right edge handle */
-.ui-resizable-e {
-  width: 8px;
-  right: 1px;
-}
-
-/* Minimum size constraints */
-.jqui-resizable {
-  min-width: 300px;
-  min-height: 200px;
-}
-```
-
-**Visual Design:**
-- 🔵 Light blue handles (`#0dcaf0`)
-- 👻 Semi-transparent (30% opacity)
-- ✨ Brightens on hover (60% opacity)
-- 🎯 12×12px corner handle
-- 📏 8px edge handles
-
----
-
-## Plotly Configuration
-
-### Autosize for Responsive Resizing
-
-Both plots use `autosize = TRUE`:
-
-```r
-layout(
-  ...,
-  autosize = TRUE
-)
-```
-
-This ensures plots properly fill their resized containers.
-
-### Toolbar Configuration
-
-Added cleaner toolbar with unnecessary buttons removed:
-
+### Implementation:
 ```r
 config(
-  displayModeBar = TRUE,
-  displaylogo = FALSE,
-  modeBarButtonsToRemove = c("select2d", "lasso2d")
+  displayModeBar = FALSE  # Hide toolbar completely
 )
 ```
 
-**Kept buttons:**
-- 📷 Camera (download as PNG)
-- 🔍 Zoom tools
-- 🏠 Reset axes
-- 📊 Hover compare
+**Applied to:**
+- PCA Score Plot
+- Scree Plot
 
-**Removed buttons:**
-- ❌ Box select
-- ❌ Lasso select
-- ❌ Plotly logo
+**Result:**
+- ✅ Clean plot appearance
+- ✅ No dimension text overlay
+- ✅ More screen space for plot
 
 ---
 
-## User Experience
+## 2. Removed Blue Highlights
 
-### How to Resize
+### Changed from Blue to Gray:
 
-**Method 1: Corner Handle (Both Dimensions)**
-1. Hover over bottom-right corner
-2. Handle appears (blue square)
-3. Click and drag to resize
-
-**Method 2: Edge Handles (Single Dimension)**
-1. Hover over right edge or bottom edge
-2. Handle appears (blue bar)
-3. Click and drag to resize in that direction
-
-### Visual Feedback
-
-**Before hover:**
-```
-┌─────────────────────────────┐
-│                             │
-│        PCA Plot             │
-│                             │
-│                          ░░░│ ← Light blue (30%)
-└─────────────────────────────┘
+**Before (Blue):**
+```css
+.ui-resizable-handle {
+  background-color: #0dcaf0;  /* Blue */
+  opacity: 0.3;
+}
 ```
 
-**During hover:**
-```
-┌─────────────────────────────┐
-│                             │
-│        PCA Plot             │
-│                             │
-│                          ███│ ← Brighter blue (60%)
-└─────────────────────────────┘
-```
-
-**During resize:**
-```
-┌─────────────────────────────┐
-│                             │
-│        PCA Plot             │
-│                             │
-│                      ↘️  ███│ ← Cursor shows resize
-└─────────────────────────────┘
+**After (Gray):**
+```css
+.ui-resizable-handle {
+  background-color: #dee2e6;  /* Light gray */
+  opacity: 0.5;
+}
+.ui-resizable-handle:hover {
+  opacity: 0.8;
+}
+.ui-resizable-se {
+  background-color: #adb5bd;  /* Darker gray for corner */
+}
 ```
 
----
+**Visual Difference:**
 
-## Aspect Ratio Examples
+Before: 🔵 Blue handles (noticeable)
+After: ⚪ Gray handles (subtle)
 
-### Scree Plot (4:9 ratio)
-
-**Default (400px height):**
-- Height: 400px
-- Width: 900px (2.25 × 400)
-
-**Resized smaller (300px height):**
-- Height: 300px
-- Width: 675px (2.25 × 300)
-
-**Resized larger (600px height):**
-- Height: 600px
-- Width: 1350px (2.25 × 600)
-
-### Visual Comparison
-
-**4:9 Ratio (Scree Plot):**
-```
-┌───────────────────────────────────────┐
-│                                       │
-│          Wide Scree Plot              │
-│                                       │
-└───────────────────────────────────────┘
-       9 units wide : 4 units tall
-```
-
-**Free Resize (PCA Score Plot):**
-```
-┌────────────────┐
-│                │
-│                │
-│   PCA Score    │
-│                │
-│                │
-│                │
-└────────────────┘
-  Any ratio works
-```
-
----
-
-## Benefits
-
-### 1. User Flexibility
-- ✅ Customize plot sizes to fit screen/presentation
-- ✅ Adjust for different display resolutions
-- ✅ Optimize for screenshots or reports
-
-### 2. Scree Plot Optimization
-- ✅ Wide format naturally fits many PCs
-- ✅ Better label readability
+**Benefits:**
+- ✅ Less visually distracting
 - ✅ Professional appearance
-- ✅ Consistent aspect ratio across sessions
-
-### 3. Responsive Design
-- ✅ Plots auto-adjust to container size
-- ✅ No distortion or stretching
-- ✅ Smooth resizing with visual feedback
-
-### 4. Professional Appearance
-- ✅ Subtle, non-intrusive handles
-- ✅ Smooth hover transitions
-- ✅ Minimum size prevents too-small plots
-- ✅ Clean toolbar (no clutter)
+- ✅ Blends with Bootstrap theme
+- ✅ Still visible on hover
 
 ---
 
-## Use Cases
+## 3. PCA Score Plot Only Resizable
 
-### Use Case 1: Presentation Mode
-**Scenario:** Preparing for a presentation
-1. Maximize PCA score plot for main slide
-2. Adjust scree plot to fit sidebar
-3. Take screenshots at optimal sizes
-
-### Use Case 2: Side-by-Side Comparison
-**Scenario:** Comparing multiple analyses
-1. Resize plots to fit multiple browser windows
-2. Maintain consistent scree plot ratios
-3. Easy visual comparison
-
-### Use Case 3: Report Generation
-**Scenario:** Creating analysis reports
-1. Resize to specific dimensions
-2. Download as PNG at exact size
-3. Consistent formatting across figures
-
-### Use Case 4: Small Screen Optimization
-**Scenario:** Working on laptop
-1. Shrink plots to see more content
-2. Maintain aspect ratios for professional look
-3. Expand when needed for detail
-
----
-
-## Technical Constraints
-
-### Minimum Sizes
-- **Width:** 300px minimum
-- **Height:** 200px minimum
-- **Reason:** Ensures plots remain readable
-
-### Maximum Sizes
-- **Width:** Container width (card body)
-- **Height:** Unlimited (within reason)
-- **Reason:** Allows flexibility without breaking layout
-
-### Scree Plot Aspect Ratio Lock
-- **Ratio:** 9:4 (width:height)
-- **Behavior:** Width adjusts when height changes
-- **Override:** Not possible (by design for consistency)
-
----
-
-## Browser Compatibility
-
-### Supported Browsers
-- ✅ Chrome/Edge (Chromium) - Full support
-- ✅ Firefox - Full support
-- ✅ Safari - Full support
-- ✅ Opera - Full support
-
-### Fallback Behavior
-- If jQuery UI fails to load: Plots remain at default size
-- If resize fails: Plots still function normally
-- No breaking errors
-
----
-
-## Performance Considerations
-
-### Resize Performance
-- ⚡ Smooth resizing (hardware accelerated)
-- ⚡ Plotly auto-adjusts efficiently
-- ⚡ No noticeable lag
-
-### Memory Impact
-- 📊 Minimal overhead from jQuery UI
-- 📊 Plotly handles responsiveness natively
-- 📊 No memory leaks observed
-
----
-
-## Comparison: Before vs After
-
-### Before (Fixed Sizes)
+### What Changed:
 
 **PCA Score Plot:**
-- Height: 600px (fixed)
-- Width: Container width (fixed)
-- ❌ Cannot adjust
+- ✅ Resizable card container
+- ✅ Drag handle visible
+- ✅ Min: 400×400px, Max: 2000×1500px
 
 **Scree Plot:**
-- Height: 300px (fixed)
-- Width: Container width (fixed)
-- ❌ Cannot adjust
-- ❌ May be too tall or too short
+- ❌ Not resizable (removed `jqui_resizable`)
+- ✅ Fixed at 400px height
+- ✅ Width: 100% of container
 
-### After (Resizable)
+### Code Changes:
 
-**PCA Score Plot:**
-- Height: 600px (default)
-- Width: Container width (default)
-- ✅ Fully resizable
-- ✅ Drag to any size
+**Before:**
+```r
+jqui_resizable(
+  card(
+    card_header("Variance Explained"),
+    card_body(plotlyOutput("pca_scree", ...))
+  ),
+  options = list(aspectRatio = 9/4)
+)
+```
 
-**Scree Plot:**
-- Height: 400px (default)
-- Width: 900px (based on 4:9 ratio)
-- ✅ Resizable with maintained aspect ratio
-- ✅ Professional wide format
+**After:**
+```r
+card(
+  card_header("Variance Explained"),
+  card_body(plotlyOutput("pca_scree", width = "100%", height = "400px"))
+)
+```
 
----
-
-## Future Enhancements
-
-Potential additions:
-1. **Save preferences** - Remember user's preferred sizes
-2. **Preset sizes** - Quick buttons for common dimensions
-3. **Lock/unlock ratio** - Toggle aspect ratio constraint
-4. **Double-click reset** - Return to default size
-5. **Synchronize sizes** - Match multiple plot dimensions
-
----
-
-## Troubleshooting
-
-### Handle not appearing
-**Solution:** Hover cursor near bottom-right corner or edges
-
-### Cannot resize smaller
-**Solution:** Minimum size is 300×200px (by design)
-
-### Scree plot won't resize freely
-**Solution:** 4:9 aspect ratio is locked (by design), adjust height and width follows
-
-### Plot not filling resized area
-**Solution:** Refresh page or click "Reset axes" in plot toolbar
+**Result:**
+- ✅ Scree plot has consistent size
+- ✅ Less clutter (one resize handle instead of two)
+- ✅ Simpler user experience
 
 ---
 
-## Example Workflow
+## 4. Fixed Height Filling Issue
 
-### Optimizing for Screenshot
+### Problem:
+Plot was filling width but not height properly in resizable card.
 
-1. **Open PCA Analysis tab**
-   - Default PCA plot: 600px × container width
-   - Default scree plot: 400px × 900px
+### Solution:
+Complete flexbox restructure for proper height propagation.
 
-2. **Adjust PCA Score Plot**
-   - Drag corner handle to 800px × 800px
-   - Square format for main figure
+### CSS Changes:
 
-3. **Adjust Scree Plot**
-   - Drag corner handle to make height 300px
-   - Width automatically becomes 675px (maintains 4:9)
-   - Perfect for supplementary figure
+```css
+/* Card uses flexbox column */
+.jqui-resizable .card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
-4. **Take Screenshots**
-   - Use Plotly's camera button
-   - Or browser screenshot tool
-   - Consistent, professional sizes
+/* Card body flexes to fill available space */
+.jqui-resizable .card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
-5. **Insert into Report**
-   - PCA score plot: Main figure
-   - Scree plot: Supplementary figure
-   - Both properly sized and formatted
+/* All children flex to fill */
+.jqui-resizable .card-body > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
 
-This workflow demonstrates how the resizable plots enable better figure preparation for publications and presentations.
+/* Spinner container flexes */
+.jqui-resizable .card-body .shiny-spinner-output-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Plotly plot fills remaining space */
+.jqui-resizable .card-body .plotly {
+  flex: 1;
+  height: 100% !important;
+}
+```
+
+### How It Works:
+
+```
+Card (height: 650px)                 ← Set by jqui_resizable
+  ├─ Header (auto height ~50px)      ← Fixed
+  └─ Body (flex: 1)                  ← Fills remaining
+      └─ Spinner (flex: 1)           ← Fills body
+          └─ Plot (flex: 1)          ← Fills spinner
+```
+
+**Result:**
+- ✅ Plot fills 100% of available height
+- ✅ Responds immediately to card resize
+- ✅ No empty space below plot
+- ✅ Works at any card size
+
+---
+
+## 5. Added Progress Bars
+
+### Save Operation Progress:
+
+```
+Progress: Saving session
+[▓▓▓░░░░░░░] 30%  Preparing data...
+[▓▓▓▓░░░░░░] 40%  Including DESeq2 dataset...
+[▓▓▓▓▓░░░░░] 50%  Including VST-normalized counts...
+[▓▓▓▓▓▓░░░░] 60%  Including PCA results...
+[▓▓▓▓▓▓▓░░░] 70%  Creating session file...
+[▓▓▓▓▓▓▓▓░░] 80%  Packaging data...
+[▓▓▓▓▓▓▓▓▓░] 90%  Writing to disk...
+[▓▓▓▓▓▓▓▓▓▓] 100% Complete!
+```
+
+### Load Operation Progress:
+
+```
+Progress: Loading session
+[▓▓░░░░░░░░] 20%  Reading session file...
+[▓▓▓▓░░░░░░] 40%  Restoring metadata...
+[▓▓▓▓▓▓░░░░] 60%  Restoring count data...
+[▓▓▓▓▓▓▓▓░░] 80%  Restoring PCA results...
+[▓▓▓▓▓▓▓▓▓▓] 100% Complete!
+```
+
+### Implementation:
+
+**Save:**
+```r
+progress <- Progress$new()
+on.exit(progress$close())
+
+progress$set(message = "Saving session", value = 0)
+progress$set(value = 0.1, detail = "Preparing data...")
+# ... operations ...
+progress$set(value = 0.4, detail = "Including DESeq2 dataset...")
+# ... more operations ...
+progress$set(value = 1, detail = "Complete!")
+Sys.sleep(0.3)  # Brief pause to show completion
+```
+
+**Load:**
+```r
+progress <- Progress$new()
+on.exit(progress$close())
+
+progress$set(message = "Loading session", value = 0)
+progress$set(value = 0.2, detail = "Reading session file...")
+# ... operations ...
+progress$set(value = 0.8, detail = "Restoring PCA results...")
+# ... more operations ...
+progress$set(value = 1, detail = "Complete!")
+Sys.sleep(0.3)  # Brief pause to show completion
+```
+
+### Progress Stages:
+
+**Save:**
+1. 0% - Start
+2. 10% - Preparing data
+3. 20% - Collecting metadata/counts
+4. 40% - Including DDS (if exists)
+5. 50% - Including VST (if exists)
+6. 60% - Including PCA (if exists)
+7. 70% - Creating session file
+8. 80% - Packaging data
+9. 90% - Writing to disk
+10. 100% - Complete
+
+**Load:**
+1. 0% - Start
+2. 20% - Reading file
+3. 40% - Restoring metadata
+4. 60% - Restoring counts
+5. 80% - Restoring PCA (if exists)
+6. 100% - Complete
+
+**Benefits:**
+- ✅ User feedback during long operations
+- ✅ Shows exactly what's happening
+- ✅ Prevents user anxiety ("is it frozen?")
+- ✅ Professional appearance
+
+---
+
+## Visual Comparison
+
+### Before:
+```
+┌────────────────────────────────┐
+│ PCA Score Plot            [📊] │
+├────────────────────────────────┤
+│                                │
+│    [Plot with dimensions]      │ 🔵 Blue handles
+│    600×800px                   │ ← Dimensions shown
+│                             ███│
+└────────────────────────────────┘
+
+┌────────────────────────────────┐
+│ Variance Explained             │
+│    [Plot]                   ███│ 🔵 Blue handles
+└────────────────────────────────┘ ← Also resizable
+```
+
+### After:
+```
+┌────────────────────────────────┐
+│ PCA Score Plot            [📊] │
+├────────────────────────────────┤
+│                                │
+│    [Clean plot]                │ ⚪ Gray handles
+│                                │ ← No dimensions
+│                             ░░░│
+└────────────────────────────────┘
+
+┌────────────────────────────────┐
+│ Variance Explained             │
+│    [Plot - fixed size]         │ ← Not resizable
+└────────────────────────────────┘
+```
+
+**Improvements:**
+1. ✅ Cleaner plot (no toolbar)
+2. ✅ Subtle handles (gray vs blue)
+3. ✅ Only one resizable element
+4. ✅ Consistent scree plot size
+5. ✅ Progress feedback during save/load
+
+---
+
+## User Experience Flow
+
+### Resizing PCA Plot:
+1. User hovers near bottom-right of PCA score card
+2. Gray handle appears (subtle, not distracting)
+3. Handle brightens on hover (visual feedback)
+4. User drags to resize card
+5. Plot automatically fills new card size
+6. No dimensions text appears
+
+### Saving Session:
+1. User clicks "Save Now" button
+2. Progress bar appears: "Saving session"
+3. Progress updates show each step
+4. Brief "Complete!" message
+5. Success notification appears
+6. Progress bar closes automatically
+
+### Loading Session:
+1. User enters session ID and clicks "Load Session"
+2. Progress bar appears: "Loading session"
+3. Progress updates show restoration steps
+4. Brief "Complete!" message
+5. Success notification appears
+6. Automatically switches to editor tab
+7. Progress bar closes automatically
+
+---
+
+## Technical Details
+
+### Flexbox Height Fix:
+The key was using `flex: 1` throughout the chain:
+- Card body flexes to fill card minus header
+- Spinner container flexes to fill body
+- Plot flexes to fill spinner container
+- Result: Plot always fills available space
+
+### Progress Bar Auto-Close:
+Using `on.exit(progress$close())` ensures:
+- Progress bar always closes (even on error)
+- No manual cleanup needed
+- Clean user experience
+
+### Gray Color Scheme:
+- Light gray: `#dee2e6` (handle edges)
+- Dark gray: `#adb5bd` (corner handle)
+- Matches Bootstrap's default border colors
+- Professional and unobtrusive
+
+---
+
+## Benefits Summary
+
+### Visual:
+- ✅ Cleaner plots (no toolbar)
+- ✅ Subtle resize handles
+- ✅ Professional appearance
+- ✅ Less visual clutter
+
+### Functional:
+- ✅ Plot properly fills height
+- ✅ PCA score plot resizable
+- ✅ Scree plot consistent size
+- ✅ Progress feedback
+
+### User Experience:
+- ✅ Clear operation progress
+- ✅ No "is it working?" anxiety
+- ✅ Smooth, responsive resizing
+- ✅ Intuitive interface
+
+---
+
+## Testing Checklist
+
+- [x] PCA score plot resizable
+- [x] Scree plot NOT resizable (fixed size)
+- [x] Plot fills full card height after resize
+- [x] No dimensions text on plots
+- [x] Gray handles (not blue)
+- [x] Handles visible on hover
+- [x] Save shows progress bar
+- [x] Load shows progress bar
+- [x] Progress bars close automatically
+- [x] Success notifications appear
+
+All improvements implemented successfully!

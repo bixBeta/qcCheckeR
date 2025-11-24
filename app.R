@@ -549,21 +549,21 @@ ui <- function(request) {
           z-index: 1050;
         }
         
-        /* Resizable plot styling */
+        /* Resizable card styling - subtle gray handles */
         .ui-resizable-handle {
-          background-color: #0dcaf0;
-          opacity: 0.3;
+          background-color: #dee2e6;
+          opacity: 0.5;
           transition: opacity 0.2s;
         }
         .ui-resizable-handle:hover {
-          opacity: 0.6;
+          opacity: 0.8;
         }
         .ui-resizable-se {
           width: 12px;
           height: 12px;
           right: 1px;
           bottom: 1px;
-          background-color: #0dcaf0;
+          background-color: #adb5bd;
           border-radius: 0 0 4px 0;
         }
         .ui-resizable-s {
@@ -575,9 +575,36 @@ ui <- function(request) {
           right: 1px;
         }
         
-        /* Ensure plots fill their containers */
+        /* Make cards resizable and plots fill them */
+        .jqui-resizable .card {
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+        }
+        .jqui-resizable .card-body {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .jqui-resizable .card-body > div {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+        }
+        .jqui-resizable .card-body .shiny-spinner-output-container {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+        }
+        .jqui-resizable .card-body .plotly {
+          flex: 1;
+          height: 100% !important;
+        }
+        
+        /* Initial sizes for resizable cards */
         .jqui-resizable {
-          min-width: 300px;
+          min-width: 400px;
           min-height: 200px;
         }
         "
@@ -788,32 +815,33 @@ ui <- function(request) {
         mainPanel(
           conditionalPanel(
             condition = "output.pca_computed",
-            card(
-              card_header("PCA Score Plot"),
-              card_body(
-                shinyjqui::jqui_resizable(
+            jqui_resizable(
+              card(
+                card_header("PCA Score Plot"),
+                card_body(
                   withSpinner(
-                    plotlyOutput("pca_plot", height = "600px"),
+                    plotlyOutput("pca_plot", width = "100%", height = "100%"),
                     type = 4,
                     color = "#0dcaf0"
                   )
                 )
+              ),
+              options = list(
+                minWidth = 400,
+                minHeight = 400,
+                maxWidth = 2000,
+                maxHeight = 1500
               )
-            ),
+            ) %>% tagAppendAttributes(style = "height: 650px; width: 100%;"),
             br(),
             layout_columns(
               card(
                 card_header("Variance Explained"),
                 card_body(
-                  shinyjqui::jqui_resizable(
-                    withSpinner(
-                      plotlyOutput("pca_scree", height = "400px"),
-                      type = 4,
-                      color = "#0dcaf0"
-                    ),
-                    options = list(
-                      aspectRatio = 9/4  # Width:Height = 9:4, inverse for height:width
-                    )
+                  withSpinner(
+                    plotlyOutput("pca_scree", width = "100%", height = "400px"),
+                    type = 4,
+                    color = "#0dcaf0"
                   )
                 )
               ),
@@ -865,14 +893,15 @@ server <- function(input, output, session) {
 
   observeEvent(input$save_now_global, {
     if (!is.null(data_rv$meta)) {
+      # Create progress bar
+      progress <- Progress$new()
+      on.exit(progress$close())
+      
+      progress$set(message = "Saving session", value = 0)
+      
       tryCatch(
         {
-          showNotification(
-            "Preparing data for save...",
-            id = "saving",
-            duration = NULL,
-            type = "message"
-          )
+          progress$set(value = 0.1, detail = "Preparing data...")
           
           # Get current metadata (including any edits)
           current_meta <- data_rv$meta
@@ -883,6 +912,8 @@ server <- function(input, output, session) {
             }
           }
           
+          progress$set(value = 0.2, detail = "Collecting metadata and counts...")
+          
           # Prepare data to save
           save_data <- list(
             metadata = current_meta,
@@ -891,29 +922,20 @@ server <- function(input, output, session) {
           
           # Add DDS object if it exists (from PCA computation)
           if (!is.null(pca_rv$pca_result) && !is.null(pca_rv$pca_result$dds)) {
+            progress$set(value = 0.4, detail = "Including DESeq2 dataset...")
             save_data$dds <- pca_rv$pca_result$dds
-            showNotification(
-              "Including DESeq2 dataset...",
-              id = "saving",
-              duration = NULL,
-              type = "message"
-            )
           }
           
           # Add VST-transformed counts if they exist
           if (!is.null(pca_rv$pca_result) && !is.null(pca_rv$pca_result$vst)) {
+            progress$set(value = 0.5, detail = "Including VST-normalized counts...")
             save_data$vst_counts <- SummarizedExperiment::assay(pca_rv$pca_result$vst)
             save_data$vst_result <- pca_rv$pca_result$vst  # Save full VST object for restoration
-            showNotification(
-              "Including VST-normalized counts...",
-              id = "saving",
-              duration = NULL,
-              type = "message"
-            )
           }
           
           # Add PCA results if they exist
           if (!is.null(pca_rv$pca_result)) {
+            progress$set(value = 0.6, detail = "Including PCA results...")
             save_data$pca_result <- list(
               pca = pca_rv$pca_result$pca,
               pca_data = pca_rv$pca_data,
@@ -921,20 +943,9 @@ server <- function(input, output, session) {
               ntop = pca_rv$pca_result$ntop,
               params_used = pca_rv$pca_result$params_used  # Save parameters used
             )
-            showNotification(
-              "Including PCA results...",
-              id = "saving",
-              duration = NULL,
-              type = "message"
-            )
           }
           
-          showNotification(
-            "Saving session to disk...",
-            id = "saving",
-            duration = NULL,
-            type = "message"
-          )
+          progress$set(value = 0.7, detail = "Creating session file...")
           
           # Save using custom save function
           session_id <- isolate(storage$session_id())
@@ -944,6 +955,8 @@ server <- function(input, output, session) {
           
           # Create session file
           session_file <- file.path("saved_sessions", paste0(session_id, ".rds"))
+          
+          progress$set(value = 0.8, detail = "Packaging data...")
           
           session_data <- list(
             session_id = session_id,
@@ -957,9 +970,12 @@ server <- function(input, output, session) {
             last_accessed = Sys.time()
           )
           
+          progress$set(value = 0.9, detail = "Writing to disk...")
           saveRDS(session_data, session_file)
           
-          removeNotification("saving")
+          progress$set(value = 1, detail = "Complete!")
+          Sys.sleep(0.3)  # Brief pause to show completion
+          
           showNotification(
             "Session saved successfully! All data, PCA, and DDS objects saved.",
             type = "message",
@@ -973,7 +989,6 @@ server <- function(input, output, session) {
           if (!is.null(save_data$pca_result)) cat("  - PCA results included\n")
         },
         error = function(e) {
-          removeNotification("saving")
           showNotification(
             paste("Save failed:", e$message),
             type = "error",
@@ -1146,25 +1161,31 @@ server <- function(input, output, session) {
     session_id <- trimws(input$session_id_input)
 
     if (nzchar(session_id)) {
-      showNotification(
-        "Loading session...",
-        type = "message",
-        duration = NULL,
-        id = "loading_session"
-      )
+      # Create progress bar
+      progress <- Progress$new()
+      on.exit(progress$close())
+      
+      progress$set(message = "Loading session", value = 0)
+      progress$set(value = 0.2, detail = "Reading session file...")
 
       # Use storage module to load session
       session_data <- storage$load_session(session_id)
 
       if (!is.null(session_data)) {
+        progress$set(value = 0.4, detail = "Restoring metadata...")
+        
         # Restore the edited data
         data_rv$meta <- session_data$current_edits$metadata
         data_rv$orig_meta <- session_data$file_data$metadata
         data_rv$counts <- session_data$current_edits$counts
         data_rv$orig_counts <- session_data$file_data$counts
         
+        progress$set(value = 0.6, detail = "Restoring count data...")
+        
         # Restore PCA results if they exist
         if (!is.null(session_data$current_edits$pca_result)) {
+          progress$set(value = 0.8, detail = "Restoring PCA results...")
+          
           pca_rv$pca_result <- list(
             pca = session_data$current_edits$pca_result$pca,
             vst = session_data$current_edits$vst_result,
@@ -1189,7 +1210,9 @@ server <- function(input, output, session) {
           pca_rv$computed <- FALSE
         }
 
-        removeNotification("loading_session")
+        progress$set(value = 1, detail = "Complete!")
+        Sys.sleep(0.3)  # Brief pause to show completion
+        
         showNotification(
           "Session loaded successfully! All edits preserved.",
           type = "message"
@@ -1206,7 +1229,6 @@ server <- function(input, output, session) {
           )
         )
       } else {
-        removeNotification("loading_session")
         showNotification(
           "Session not found. Please check the Session ID or start a new session.",
           type = "error"
@@ -1646,9 +1668,7 @@ server <- function(input, output, session) {
         autosize = TRUE
       ) %>%
       config(
-        displayModeBar = TRUE,
-        displaylogo = FALSE,
-        modeBarButtonsToRemove = c("select2d", "lasso2d")
+        displayModeBar = FALSE  # Hide toolbar to remove dimensions display
       )
     
     p
@@ -1706,9 +1726,7 @@ server <- function(input, output, session) {
         autosize = TRUE
       ) %>%
       config(
-        displayModeBar = TRUE,
-        displaylogo = FALSE,
-        modeBarButtonsToRemove = c("select2d", "lasso2d")
+        displayModeBar = FALSE  # Hide toolbar to remove dimensions display
       )
     
     p
