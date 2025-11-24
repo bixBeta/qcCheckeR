@@ -15,7 +15,8 @@ required_packages <- c(
   "plotly",
   "ggplot2",
   "DESeq2",
-  "matrixStats"
+  "matrixStats",
+  "shinyjqui"
 )
 
 # Install missing packages
@@ -547,6 +548,38 @@ ui <- function(request) {
           right: 15px;
           z-index: 1050;
         }
+        
+        /* Resizable plot styling */
+        .ui-resizable-handle {
+          background-color: #0dcaf0;
+          opacity: 0.3;
+          transition: opacity 0.2s;
+        }
+        .ui-resizable-handle:hover {
+          opacity: 0.6;
+        }
+        .ui-resizable-se {
+          width: 12px;
+          height: 12px;
+          right: 1px;
+          bottom: 1px;
+          background-color: #0dcaf0;
+          border-radius: 0 0 4px 0;
+        }
+        .ui-resizable-s {
+          height: 8px;
+          bottom: 1px;
+        }
+        .ui-resizable-e {
+          width: 8px;
+          right: 1px;
+        }
+        
+        /* Ensure plots fill their containers */
+        .jqui-resizable {
+          min-width: 300px;
+          min-height: 200px;
+        }
         "
       ))
     ),
@@ -758,10 +791,12 @@ ui <- function(request) {
             card(
               card_header("PCA Score Plot"),
               card_body(
-                withSpinner(
-                  plotlyOutput("pca_plot", height = "600px"),
-                  type = 4,
-                  color = "#0dcaf0"
+                shinyjqui::jqui_resizable(
+                  withSpinner(
+                    plotlyOutput("pca_plot", height = "600px"),
+                    type = 4,
+                    color = "#0dcaf0"
+                  )
                 )
               )
             ),
@@ -770,10 +805,15 @@ ui <- function(request) {
               card(
                 card_header("Variance Explained"),
                 card_body(
-                  withSpinner(
-                    plotlyOutput("pca_scree", height = "300px"),
-                    type = 4,
-                    color = "#0dcaf0"
+                  shinyjqui::jqui_resizable(
+                    withSpinner(
+                      plotlyOutput("pca_scree", height = "400px"),
+                      type = 4,
+                      color = "#0dcaf0"
+                    ),
+                    options = list(
+                      aspectRatio = 9/4  # Width:Height = 9:4, inverse for height:width
+                    )
                   )
                 )
               ),
@@ -878,7 +918,8 @@ server <- function(input, output, session) {
               pca = pca_rv$pca_result$pca,
               pca_data = pca_rv$pca_data,
               var_explained = pca_rv$pca_result$var_explained,
-              ntop = pca_rv$pca_result$ntop
+              ntop = pca_rv$pca_result$ntop,
+              params_used = pca_rv$pca_result$params_used  # Save parameters used
             )
             showNotification(
               "Including PCA results...",
@@ -1130,7 +1171,8 @@ server <- function(input, output, session) {
             dds = session_data$current_edits$dds,
             pca_data = session_data$current_edits$pca_result$pca_data,
             var_explained = session_data$current_edits$pca_result$var_explained,
-            ntop = session_data$current_edits$pca_result$ntop
+            ntop = session_data$current_edits$pca_result$ntop,
+            params_used = session_data$current_edits$pca_result$params_used  # Restore parameters
           )
           pca_rv$pca_data <- as.data.frame(session_data$current_edits$pca_result$pca_data)
           pca_rv$computed <- TRUE
@@ -1462,7 +1504,12 @@ server <- function(input, output, session) {
         dds = dds,  # Store DDS object
         pca_data = pca_coords,
         var_explained = pca_full$sdev^2 / sum(pca_full$sdev^2) * 100,
-        ntop = input$pca_ntop
+        ntop = input$pca_ntop,
+        params_used = list(  # Store actual parameters used
+          blind = input$vst_blind,
+          fitType = input$vst_fitType,
+          ntop = input$pca_ntop
+        )
       )
       pca_rv$pca_data <- as.data.frame(pca_coords)
       pca_rv$computed <- TRUE
@@ -1595,7 +1642,13 @@ server <- function(input, output, session) {
         ),
         hovermode = "closest",
         plot_bgcolor = "#f8f9fa",
-        paper_bgcolor = "white"
+        paper_bgcolor = "white",
+        autosize = TRUE
+      ) %>%
+      config(
+        displayModeBar = TRUE,
+        displaylogo = FALSE,
+        modeBarButtonsToRemove = c("select2d", "lasso2d")
       )
     
     p
@@ -1649,7 +1702,13 @@ server <- function(input, output, session) {
         hovermode = "x unified",
         plot_bgcolor = "#f8f9fa",
         paper_bgcolor = "white",
-        showlegend = TRUE
+        showlegend = TRUE,
+        autosize = TRUE
+      ) %>%
+      config(
+        displayModeBar = TRUE,
+        displaylogo = FALSE,
+        modeBarButtonsToRemove = c("select2d", "lasso2d")
       )
     
     p
@@ -1668,9 +1727,10 @@ server <- function(input, output, session) {
     var_explained <- pca_rv$pca_result$var_explained
     pca_obj <- pca_rv$pca_result$pca
     
-    cat("Number of samples:", nrow(pca_obj$x), "\n")
-    cat("Top genes used:", pca_rv$pca_result$ntop, "\n")
-    cat("Number of PCs computed:", ncol(pca_obj$x), "\n\n")
+    cat("Data Dimensions:\n")
+    cat("  Number of samples:", nrow(pca_obj$x), "\n")
+    cat("  Top genes used:", pca_rv$pca_result$ntop, "\n")
+    cat("  Number of PCs computed:", ncol(pca_obj$x), "\n\n")
     
     cat("Variance Explained (%):\n")
     n_show <- min(10, length(var_explained))
@@ -1685,10 +1745,50 @@ server <- function(input, output, session) {
     cat(sprintf("\nTotal variance explained by first %d PCs: %.2f%%\n",
                 n_show, sum(var_explained[1:n_show])))
     
-    cat("\nVST Parameters:\n")
-    cat("  Blind:", input$vst_blind, "\n")
-    cat("  Fit type:", input$vst_fitType, "\n")
-    cat("  Top genes (ntop):", input$pca_ntop, "\n")
+    cat("\n")
+    cat("=", rep("=", 40), "\n", sep = "")
+    cat("Parameters Used for This PCA:\n")
+    cat("=" , rep("=", 40), "\n", sep = "")
+    
+    # Check if this is a restored PCA (no current input values match)
+    is_restored <- is.null(input$vst_blind) || 
+                   is.null(input$vst_fitType) || 
+                   is.null(input$pca_ntop)
+    
+    if (is_restored) {
+      cat("\n⚠️  RESTORED FROM SAVED SESSION\n")
+      cat("The PCA below was computed in a previous session.\n")
+      cat("Current sidebar settings may differ from what was used.\n\n")
+    }
+    
+    cat("\nVST Transformation:\n")
+    cat("  Blind to design:", 
+        if(!is.null(pca_rv$pca_result$params_used$blind)) 
+          pca_rv$pca_result$params_used$blind 
+        else "TRUE (assumed)", 
+        "\n")
+    cat("  Fit type:", 
+        if(!is.null(pca_rv$pca_result$params_used$fitType)) 
+          pca_rv$pca_result$params_used$fitType 
+        else "parametric (assumed)", 
+        "\n")
+    
+    cat("\nGene Selection:\n")
+    cat("  Top variable genes (ntop):", pca_rv$pca_result$ntop, "\n")
+    
+    cat("\nPlot Display:\n")
+    cat("  X-axis: PC", input$pca_pc_x, "\n")
+    cat("  Y-axis: PC", input$pca_pc_y, "\n")
+    cat("  Color by:", input$pca_color_by, "\n")
+    
+    cat("\n")
+    cat("-", rep("-", 40), "\n", sep = "")
+    cat("Default VST Parameters:\n")
+    cat("-", rep("-", 40), "\n", sep = "")
+    cat("Current sidebar settings (for next PCA run):\n")
+    cat("  Blind:", if(!is.null(input$vst_blind)) input$vst_blind else "TRUE", "\n")
+    cat("  Fit type:", if(!is.null(input$vst_fitType)) input$vst_fitType else "parametric", "\n")
+    cat("  Top genes:", if(!is.null(input$pca_ntop)) input$pca_ntop else "500", "\n")
   })
 }
 

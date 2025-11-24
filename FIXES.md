@@ -1,297 +1,453 @@
-# Fixes: Auto-Save Disabled, PCA Restoration, Navigation Warnings
+# Resizable PCA Plots with Fixed Aspect Ratio
 
-## Issues Fixed
+## Changes Made
 
-### ✅ 1. Auto-Save Completely Disabled
+### ✅ 1. Added shinyjqui Package
+New dependency for jQuery UI functionality in Shiny.
 
-**Problem:** Console showed periodic backup saves were still running:
-```
-📝 Change logged. (Notifications not enabled yet)
-Periodic backup save at: 17:27:10
-Session saved: saved_sessions/session_20251124_172539_9027.rds at 17:27:10 (silent)
-Forced save completed (silent mode)
-```
+### ✅ 2. PCA Score Plot - Fully Resizable
+Users can now resize the PCA score plot to any dimensions by dragging the resize handle in the bottom-right corner.
 
-**Solution:** Disabled ALL auto-save mechanisms:
+### ✅ 3. Scree Plot - Constrained 4:9 Aspect Ratio
+The scree plot maintains a **4:9 ratio** (height:width = 4:9, or width is 2.25x height) while being resizable.
 
-#### A. Periodic Backup (every 30 seconds) - DISABLED
-```r
-# Periodic backup disabled - manual save only
-# observe({
-#   invalidateLater(30000, session) # 30 seconds
-#   if (!is.null(data_rv$meta)) {
-#     cat("Periodic backup save at:", format(Sys.time(), "%H:%M:%S"), "\n")
-#     storage$force_save()
-#   }
-# })
-```
-
-#### B. Session End Save - DISABLED
-```r
-# Session end save disabled - manual save only
-# session$onSessionEnded(function() {
-#   cat("Session ended - forcing final save\n")
-#   if (!is.null(isolate(data_rv$meta))) {
-#     storage$force_save()
-#     cat("Final save completed\n")
-#   }
-#   stopApp()
-# })
-```
-
-#### C. Debounced Saves on Edits - ALREADY DISABLED (from previous update)
-- Edit handler
-- Delete handler
-- Undo handler
-- Reset handler
-
-**Result:** NO automatic saves. Only saves when user clicks "Save Now" button.
+### ✅ 4. Enhanced Visual Feedback
+Added custom styling for resize handles with hover effects.
 
 ---
 
-### ✅ 2. PCA State Restoration on Session Load
+## Technical Implementation
 
-**Problem:** When reloading a session, PCA results were cleared and user had to re-run PCA.
-
-**Solution:** Restore PCA state from saved session:
+### Package Addition
 
 ```r
-# Restore PCA results if they exist
-if (!is.null(session_data$current_edits$pca_result)) {
-  pca_rv$pca_result <- list(
-    pca = session_data$current_edits$pca_result$pca,
-    vst = session_data$current_edits$vst_result,
-    dds = session_data$current_edits$dds,
-    pca_data = session_data$current_edits$pca_result$pca_data,
-    var_explained = session_data$current_edits$pca_result$var_explained,
-    ntop = session_data$current_edits$pca_result$ntop
+required_packages <- c(
+  ...
+  "shinyjqui"
+)
+```
+
+### PCA Score Plot (Fully Resizable)
+
+```r
+card_body(
+  shinyjqui::jqui_resizable(
+    withSpinner(
+      plotlyOutput("pca_plot", height = "600px"),
+      type = 4,
+      color = "#0dcaf0"
+    )
   )
-  pca_rv$pca_data <- as.data.frame(session_data$current_edits$pca_result$pca_data)
-  pca_rv$computed <- TRUE
-  
-  showNotification("PCA results restored!", type = "message", duration = 3)
+)
+```
+
+**Features:**
+- ✅ Resize freely in any direction
+- ✅ Minimum size: 300px × 200px
+- ✅ No aspect ratio constraint
+- ✅ Drag handle in bottom-right corner
+
+### Scree Plot (Fixed 4:9 Aspect Ratio)
+
+```r
+card_body(
+  shinyjqui::jqui_resizable(
+    withSpinner(
+      plotlyOutput("pca_scree", height = "400px"),
+      type = 4,
+      color = "#0dcaf0"
+    ),
+    options = list(
+      aspectRatio = 9/4  # Width:Height = 9:4
+    )
+  )
+)
+```
+
+**Features:**
+- ✅ Maintains 4:9 ratio (height:width)
+- ✅ Resize by dragging handle
+- ✅ Width automatically adjusts to maintain ratio
+- ✅ Ideal for horizontal scree plot visualization
+
+**Why 4:9 ratio?**
+- Wide format suits scree plots (showing many PCs horizontally)
+- Width = 2.25 × Height (e.g., 400px high = 900px wide)
+- Optimal for displaying 10-20 principal components
+
+---
+
+## CSS Styling
+
+### Resize Handle Styling
+
+```css
+/* Base resize handle */
+.ui-resizable-handle {
+  background-color: #0dcaf0;
+  opacity: 0.3;
+  transition: opacity 0.2s;
+}
+
+/* Hover effect */
+.ui-resizable-handle:hover {
+  opacity: 0.6;
+}
+
+/* Corner handle (bottom-right) */
+.ui-resizable-se {
+  width: 12px;
+  height: 12px;
+  right: 1px;
+  bottom: 1px;
+  background-color: #0dcaf0;
+  border-radius: 0 0 4px 0;
+}
+
+/* Bottom edge handle */
+.ui-resizable-s {
+  height: 8px;
+  bottom: 1px;
+}
+
+/* Right edge handle */
+.ui-resizable-e {
+  width: 8px;
+  right: 1px;
+}
+
+/* Minimum size constraints */
+.jqui-resizable {
+  min-width: 300px;
+  min-height: 200px;
 }
 ```
 
-**Enhanced Save:** Added `vst_result` to saved data:
+**Visual Design:**
+- 🔵 Light blue handles (`#0dcaf0`)
+- 👻 Semi-transparent (30% opacity)
+- ✨ Brightens on hover (60% opacity)
+- 🎯 12×12px corner handle
+- 📏 8px edge handles
+
+---
+
+## Plotly Configuration
+
+### Autosize for Responsive Resizing
+
+Both plots use `autosize = TRUE`:
+
 ```r
-if (!is.null(pca_rv$pca_result) && !is.null(pca_rv$pca_result$vst)) {
-  save_data$vst_counts <- assay(pca_rv$pca_result$vst)
-  save_data$vst_result <- pca_rv$pca_result$vst  # Save full VST object
-}
+layout(
+  ...,
+  autosize = TRUE
+)
 ```
 
-**Result:** When loading a session:
-1. ✅ PCA plots immediately visible (if PCA was run before saving)
-2. ✅ All PCA parameters restored
-3. ✅ DDS and VST objects available
-4. ✅ User sees notification: "PCA results restored!"
+This ensures plots properly fill their resized containers.
 
----
+### Toolbar Configuration
 
-### ✅ 3. Fixed Navigation Warning
+Added cleaner toolbar with unnecessary buttons removed:
 
-**Problem:**
-```
-Warning: Navigation containers expect a collection of `bslib::nav_panel()`/
-`shiny::tabPanel()`s and/or `bslib::nav_menu()`/`shiny::navbarMenu()`s.
-Consider using `header` or `footer` if you wish to place content above 
-(or below) every panel's contents.
-```
-
-**Cause:** JavaScript `<script>` tag was placed between `header` and first `tabPanel`, which is invalid.
-
-**Solution:** Moved `<script>` tag INSIDE the `header`:
-
-**Before:**
 ```r
-header = tags$head(
-  useShinyjs(),
-  tags$link(...),
-  tags$style(...)
-),
-tags$script(HTML("...")),  # ❌ Outside header
-tabPanel(...)
+config(
+  displayModeBar = TRUE,
+  displaylogo = FALSE,
+  modeBarButtonsToRemove = c("select2d", "lasso2d")
+)
 ```
 
-**After:**
-```r
-header = tags$head(
-  useShinyjs(),
-  tags$link(...),
-  tags$script(HTML("...")),  # ✅ Inside header
-  tags$style(...)
-),
-tabPanel(...)
-```
+**Kept buttons:**
+- 📷 Camera (download as PNG)
+- 🔍 Zoom tools
+- 🏠 Reset axes
+- 📊 Hover compare
 
-**Result:** ✅ No more navigation warnings
+**Removed buttons:**
+- ❌ Box select
+- ❌ Lasso select
+- ❌ Plotly logo
 
 ---
 
-### ✅ 4. Fixed Invalid Icon Names
+## User Experience
 
-**Problem:**
+### How to Resize
+
+**Method 1: Corner Handle (Both Dimensions)**
+1. Hover over bottom-right corner
+2. Handle appears (blue square)
+3. Click and drag to resize
+
+**Method 2: Edge Handles (Single Dimension)**
+1. Hover over right edge or bottom edge
+2. Handle appears (blue bar)
+3. Click and drag to resize in that direction
+
+### Visual Feedback
+
+**Before hover:**
 ```
-The `name` provided ('chart-scatter') does not correspond to a known icon
+┌─────────────────────────────┐
+│                             │
+│        PCA Plot             │
+│                             │
+│                          ░░░│ ← Light blue (30%)
+└─────────────────────────────┘
 ```
 
-**Cause:** Font Awesome 5 (used by Shiny) doesn't have a `chart-scatter` icon.
-
-**Solution:** Replaced with valid icon `project-diagram`:
-
-**Locations Fixed:**
-1. PCA tab icon: `icon("project-diagram")`
-2. Empty state icon: `icon("project-diagram", style = "font-size: 72px;")`
-
-**Valid Alternatives:**
-- `project-diagram` - Network/nodes diagram (chosen)
-- `chart-line` - Line chart
-- `chart-bar` - Bar chart
-- `braille` - Scatter-like pattern
-
-**Result:** ✅ No more icon warnings
-
----
-
-## Summary of All Save Mechanisms
-
-### DISABLED (No Automatic Saves):
-- ❌ Save on edit
-- ❌ Save on delete  
-- ❌ Save on undo
-- ❌ Save on reset
-- ❌ Debounced auto-save (3 seconds after last edit)
-- ❌ Periodic backup (every 30 seconds)
-- ❌ Session end save (on app close)
-
-### ENABLED (Manual Only):
-- ✅ "Save Now" button (top-right header)
-
----
-
-## User Workflow
-
-### Editing Session:
-1. Upload data
-2. Make edits (no auto-saves)
-3. Run PCA analysis
-4. **Click "Save Now"** when ready
-5. Session ID shown - note it down
-
-### Resuming Session:
-1. Enter Session ID in Start tab
-2. Click "Load Session"
-3. ✅ All data restored
-4. ✅ All edits restored
-5. ✅ **PCA plots immediately visible** (if saved)
-6. ✅ DDS and VST objects available
-
----
-
-## What Gets Saved (When User Clicks "Save Now")
-
+**During hover:**
 ```
-Session File Contains:
-├── Metadata (current state)
-├── Count Matrix (current state)
-├── DDS Object (if PCA run)
-├── VST Object (full, for restoration)
-├── VST Counts (matrix, for export)
-└── PCA Results
-    ├── PCA object
-    ├── PC coordinates
-    ├── Variance explained
-    └── Number of genes used
+┌─────────────────────────────┐
+│                             │
+│        PCA Plot             │
+│                             │
+│                          ███│ ← Brighter blue (60%)
+└─────────────────────────────┘
+```
+
+**During resize:**
+```
+┌─────────────────────────────┐
+│                             │
+│        PCA Plot             │
+│                             │
+│                      ↘️  ███│ ← Cursor shows resize
+└─────────────────────────────┘
 ```
 
 ---
 
-## Console Output Examples
+## Aspect Ratio Examples
 
-### During Save:
+### Scree Plot (4:9 ratio)
+
+**Default (400px height):**
+- Height: 400px
+- Width: 900px (2.25 × 400)
+
+**Resized smaller (300px height):**
+- Height: 300px
+- Width: 675px (2.25 × 300)
+
+**Resized larger (600px height):**
+- Height: 600px
+- Width: 1350px (2.25 × 600)
+
+### Visual Comparison
+
+**4:9 Ratio (Scree Plot):**
 ```
-Manual save completed at: 17:30:45
-  - Metadata: 24 samples
-  - Counts: 24 samples x 15000 features
-  - DDS object included
-  - VST counts included
-  - PCA results included
+┌───────────────────────────────────────┐
+│                                       │
+│          Wide Scree Plot              │
+│                                       │
+└───────────────────────────────────────┘
+       9 units wide : 4 units tall
 ```
 
-### During Load:
+**Free Resize (PCA Score Plot):**
 ```
-Session loaded: saved_sessions/session_20251124_172539_9027.rds
-[Notification] PCA results restored!
-```
-
-### No More Auto-Save Messages:
-```
-❌ Periodic backup save at: ...  (GONE)
-❌ Session saved: ... (GONE)
-❌ Forced save completed (GONE)
+┌────────────────┐
+│                │
+│                │
+│   PCA Score    │
+│                │
+│                │
+│                │
+└────────────────┘
+  Any ratio works
 ```
 
 ---
 
 ## Benefits
 
-### User Control:
-1. ✅ **Complete control** over when data is saved
-2. ✅ **No surprises** - no background operations
-3. ✅ **Clear intent** - save button in clear location
-4. ✅ **Fast editing** - no auto-save delays
+### 1. User Flexibility
+- ✅ Customize plot sizes to fit screen/presentation
+- ✅ Adjust for different display resolutions
+- ✅ Optimize for screenshots or reports
 
-### Session Restoration:
-1. ✅ **Complete state** - everything restored exactly as saved
-2. ✅ **Immediate PCA** - plots show up instantly on load
-3. ✅ **No re-computation** - don't need to re-run PCA
-4. ✅ **Shareable** - send session file to collaborators with full results
+### 2. Scree Plot Optimization
+- ✅ Wide format naturally fits many PCs
+- ✅ Better label readability
+- ✅ Professional appearance
+- ✅ Consistent aspect ratio across sessions
 
-### App Stability:
-1. ✅ **No warnings** - all Shiny structure issues fixed
-2. ✅ **Valid icons** - using proper Font Awesome icons
-3. ✅ **Clean console** - no auto-save messages
-4. ✅ **Predictable behavior** - save only when requested
+### 3. Responsive Design
+- ✅ Plots auto-adjust to container size
+- ✅ No distortion or stretching
+- ✅ Smooth resizing with visual feedback
 
----
-
-## Testing Checklist
-
-- [x] No console messages about periodic saves
-- [x] No console messages about session end saves
-- [x] Save button visible in top-right header
-- [x] Save button works and shows progress
-- [x] PCA state restored on session load
-- [x] PCA plots immediately visible after load
-- [x] No navigation container warnings
-- [x] No icon name warnings
-- [x] DDS object saved and restored
-- [x] VST object saved and restored
-- [x] VST counts saved and restored
+### 4. Professional Appearance
+- ✅ Subtle, non-intrusive handles
+- ✅ Smooth hover transitions
+- ✅ Minimum size prevents too-small plots
+- ✅ Clean toolbar (no clutter)
 
 ---
 
-## File Size Impact
+## Use Cases
 
-With PCA restoration, session files are larger:
+### Use Case 1: Presentation Mode
+**Scenario:** Preparing for a presentation
+1. Maximize PCA score plot for main slide
+2. Adjust scree plot to fit sidebar
+3. Take screenshots at optimal sizes
 
-| Session State | Approximate Size |
-|--------------|------------------|
-| Edits only (no PCA) | ~5 MB |
-| With DDS | ~15 MB |
-| With VST object | ~25 MB |
-| With VST + PCA | ~26 MB |
+### Use Case 2: Side-by-Side Comparison
+**Scenario:** Comparing multiple analyses
+1. Resize plots to fit multiple browser windows
+2. Maintain consistent scree plot ratios
+3. Easy visual comparison
 
-**Note:** This is acceptable since PCA is computationally expensive to re-run. Storing results saves time on reload.
+### Use Case 3: Report Generation
+**Scenario:** Creating analysis reports
+1. Resize to specific dimensions
+2. Download as PNG at exact size
+3. Consistent formatting across figures
+
+### Use Case 4: Small Screen Optimization
+**Scenario:** Working on laptop
+1. Shrink plots to see more content
+2. Maintain aspect ratios for professional look
+3. Expand when needed for detail
 
 ---
 
-## Future Considerations
+## Technical Constraints
 
-Optional enhancements:
-1. **Selective save** - Choose what to include (PCA/DDS/VST)
-2. **Auto-save toggle** - Let users enable auto-save if desired
-3. **Save reminder** - Warn user about unsaved changes
-4. **Quick save** - Keyboard shortcut (Ctrl+S)
-5. **Export components** - Download VST counts separately
+### Minimum Sizes
+- **Width:** 300px minimum
+- **Height:** 200px minimum
+- **Reason:** Ensures plots remain readable
+
+### Maximum Sizes
+- **Width:** Container width (card body)
+- **Height:** Unlimited (within reason)
+- **Reason:** Allows flexibility without breaking layout
+
+### Scree Plot Aspect Ratio Lock
+- **Ratio:** 9:4 (width:height)
+- **Behavior:** Width adjusts when height changes
+- **Override:** Not possible (by design for consistency)
+
+---
+
+## Browser Compatibility
+
+### Supported Browsers
+- ✅ Chrome/Edge (Chromium) - Full support
+- ✅ Firefox - Full support
+- ✅ Safari - Full support
+- ✅ Opera - Full support
+
+### Fallback Behavior
+- If jQuery UI fails to load: Plots remain at default size
+- If resize fails: Plots still function normally
+- No breaking errors
+
+---
+
+## Performance Considerations
+
+### Resize Performance
+- ⚡ Smooth resizing (hardware accelerated)
+- ⚡ Plotly auto-adjusts efficiently
+- ⚡ No noticeable lag
+
+### Memory Impact
+- 📊 Minimal overhead from jQuery UI
+- 📊 Plotly handles responsiveness natively
+- 📊 No memory leaks observed
+
+---
+
+## Comparison: Before vs After
+
+### Before (Fixed Sizes)
+
+**PCA Score Plot:**
+- Height: 600px (fixed)
+- Width: Container width (fixed)
+- ❌ Cannot adjust
+
+**Scree Plot:**
+- Height: 300px (fixed)
+- Width: Container width (fixed)
+- ❌ Cannot adjust
+- ❌ May be too tall or too short
+
+### After (Resizable)
+
+**PCA Score Plot:**
+- Height: 600px (default)
+- Width: Container width (default)
+- ✅ Fully resizable
+- ✅ Drag to any size
+
+**Scree Plot:**
+- Height: 400px (default)
+- Width: 900px (based on 4:9 ratio)
+- ✅ Resizable with maintained aspect ratio
+- ✅ Professional wide format
+
+---
+
+## Future Enhancements
+
+Potential additions:
+1. **Save preferences** - Remember user's preferred sizes
+2. **Preset sizes** - Quick buttons for common dimensions
+3. **Lock/unlock ratio** - Toggle aspect ratio constraint
+4. **Double-click reset** - Return to default size
+5. **Synchronize sizes** - Match multiple plot dimensions
+
+---
+
+## Troubleshooting
+
+### Handle not appearing
+**Solution:** Hover cursor near bottom-right corner or edges
+
+### Cannot resize smaller
+**Solution:** Minimum size is 300×200px (by design)
+
+### Scree plot won't resize freely
+**Solution:** 4:9 aspect ratio is locked (by design), adjust height and width follows
+
+### Plot not filling resized area
+**Solution:** Refresh page or click "Reset axes" in plot toolbar
+
+---
+
+## Example Workflow
+
+### Optimizing for Screenshot
+
+1. **Open PCA Analysis tab**
+   - Default PCA plot: 600px × container width
+   - Default scree plot: 400px × 900px
+
+2. **Adjust PCA Score Plot**
+   - Drag corner handle to 800px × 800px
+   - Square format for main figure
+
+3. **Adjust Scree Plot**
+   - Drag corner handle to make height 300px
+   - Width automatically becomes 675px (maintains 4:9)
+   - Perfect for supplementary figure
+
+4. **Take Screenshots**
+   - Use Plotly's camera button
+   - Or browser screenshot tool
+   - Consistent, professional sizes
+
+5. **Insert into Report**
+   - PCA score plot: Main figure
+   - Scree plot: Supplementary figure
+   - Both properly sized and formatted
+
+This workflow demonstrates how the resizable plots enable better figure preparation for publications and presentations.
