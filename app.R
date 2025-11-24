@@ -11,14 +11,27 @@ required_packages <- c(
   "shinycssloaders",
   "blastula",
   "glue",
-  "shinyjs"
+  "shinyjs",
+  "plotly",
+  "ggplot2",
+  "DESeq2",
+  "matrixStats"
 )
 
 # Install missing packages
 for (pkg in required_packages) {
-  if (!require(pkg, character.only = TRUE)) {
-    install.packages(pkg)
-    library(pkg, character.only = TRUE)
+  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+    if (pkg == "DESeq2") {
+      # DESeq2 is from Bioconductor
+      if (!requireNamespace("BiocManager", quietly = TRUE)) {
+        install.packages("BiocManager")
+      }
+      BiocManager::install("DESeq2", update = FALSE, ask = FALSE)
+      library(pkg, character.only = TRUE)
+    } else {
+      install.packages(pkg)
+      library(pkg, character.only = TRUE)
+    }
   }
 }
 
@@ -274,12 +287,12 @@ editableTableServer <- function(id, data_rv, counts_rv, storage, email) {
         }
       }
 
-      # Use storage module to save (debounced)
-      current_edits <- list(
-        metadata = current_data(),
-        counts = counts_rv$counts
-      )
-      storage$update_edits(current_edits)
+      # Auto-save disabled - use manual "Save Now" button
+      # current_edits <- list(
+      #   metadata = current_data(),
+      #   counts = counts_rv$counts
+      # )
+      # storage$update_edits(current_edits)
 
       removeModal()
       showNotification("Updated! Count matrix synced.", type = "message")
@@ -310,12 +323,12 @@ editableTableServer <- function(id, data_rv, counts_rv, storage, email) {
         ]
       }
 
-      # Save changes (debounced)
-      current_edits <- list(
-        metadata = current_data(),
-        counts = counts_rv$counts
-      )
-      storage$update_edits(current_edits)
+      # Auto-save disabled - use manual "Save Now" button
+      # current_edits <- list(
+      #   metadata = current_data(),
+      #   counts = counts_rv$counts
+      # )
+      # storage$update_edits(current_edits)
 
       showNotification("Deleted. Undo available.", type = "warning")
       removeModal()
@@ -350,12 +363,12 @@ editableTableServer <- function(id, data_rv, counts_rv, storage, email) {
         counts_rv$counts[[last$label]] <- counts_rv$orig_counts[[last$label]]
       }
 
-      # Save changes (debounced)
-      current_edits <- list(
-        metadata = current_data(),
-        counts = counts_rv$counts
-      )
-      storage$update_edits(current_edits)
+      # Auto-save disabled - use manual "Save Now" button
+      # current_edits <- list(
+      #   metadata = current_data(),
+      #   counts = counts_rv$counts
+      # )
+      # storage$update_edits(current_edits)
 
       showNotification("Undo: restored.", type = "message")
     })
@@ -374,12 +387,12 @@ editableTableServer <- function(id, data_rv, counts_rv, storage, email) {
         )
       )
 
-      # Save reset state (debounced)
-      current_edits <- list(
-        metadata = data_rv$orig_meta,
-        counts = data_rv$orig_counts
-      )
-      storage$update_edits(current_edits)
+      # Auto-save disabled - use manual "Save Now" button
+      # current_edits <- list(
+      #   metadata = data_rv$orig_meta,
+      #   counts = data_rv$orig_counts
+      # )
+      # storage$update_edits(current_edits)
 
       showNotification("Reset to original uploaded data!", type = "warning")
     })
@@ -471,6 +484,25 @@ ui <- function(request) {
     header = tags$head(
       shinyjs::useShinyjs(),
       tags$link(href = "https://fonts.googleapis.com/css2?family=Stack+Sans+Headline:wght@200..700&display=swap", rel="stylesheet", rel = "stylesheet"),
+      tags$script(HTML("
+        $(document).ready(function() {
+          // Create save button
+          var saveBtn = $('<button>', {
+            id: 'save_now_global',
+            class: 'btn btn-success btn-sm',
+            style: 'position: absolute; top: 8px; right: 15px; z-index: 1050;',
+            html: '<i class=\"fa fa-save\"></i> Save Now'
+          });
+          
+          // Add to navbar
+          $('.navbar').append(saveBtn);
+          
+          // Bind click handler
+          saveBtn.on('click', function() {
+            Shiny.setInputValue('save_now_global', Math.random());
+          });
+        });
+      ")),
       tags$style(HTML(
         "
         .session-id-status {
@@ -509,6 +541,12 @@ ui <- function(request) {
         .navbar-brand {
         font-family: 'Stack Sans Headline', sans-serif;
        }
+        .save-button-header {
+          position: absolute;
+          top: 8px;
+          right: 15px;
+          z-index: 1050;
+        }
         "
       ))
     ),
@@ -615,14 +653,6 @@ ui <- function(request) {
           h4("Session Management"),
           # Use the storage module UI
           sessionStorageUI("storage"),
-          # Add manual save button
-          actionButton(
-            "manual_save",
-            "Save Now",
-            icon = icon("save"),
-            class = "btn-outline-success btn-sm",
-            style = "margin-top: 10px;"
-          ),
           hr(),
           h4("Upload .RData"),
           fileInput(
@@ -657,6 +687,124 @@ ui <- function(request) {
           )
         )
       )
+    ),
+    tabPanel(
+      "PCA Analysis",
+      value = "pca",
+      icon = icon("project-diagram"),
+      page_sidebar(
+        sidebar = sidebar(
+          width = 350,
+          h4("PCA Parameters"),
+          p("Using DESeq2 PCA with Variance Stabilizing Transformation", 
+            style = "font-size: 0.9em; color: #666;"),
+          hr(),
+          
+          # DESeq2 VST parameters
+          checkboxInput(
+            "vst_blind",
+            "Blind to experimental design (blind)",
+            value = TRUE
+          ),
+          helpText("If TRUE, dispersion estimation ignores sample information. Recommended for exploratory PCA."),
+          
+          selectInput(
+            "vst_fitType",
+            "Dispersion fit type (fitType)",
+            choices = c("parametric", "local", "mean"),
+            selected = "parametric"
+          ),
+          helpText("Method for fitting dispersion-mean relationship. Parametric is default and recommended."),
+          
+          numericInput(
+            "pca_ntop",
+            "Top variable genes (ntop)",
+            value = 500,
+            min = 100,
+            step = 100
+          ),
+          helpText("Number of top genes by variance to use for PCA. Default: 500"),
+          
+          hr(),
+          h4("Plot Options"),
+          
+          selectInput(
+            "pca_pc_x",
+            "X-axis PC:",
+            choices = c("PC1" = 1, "PC2" = 2, "PC3" = 3, "PC4" = 4, "PC5" = 5),
+            selected = 1
+          ),
+          
+          selectInput(
+            "pca_pc_y",
+            "Y-axis PC:",
+            choices = c("PC1" = 1, "PC2" = 2, "PC3" = 3, "PC4" = 4, "PC5" = 5),
+            selected = 2
+          ),
+          
+          uiOutput("pca_color_ui"),
+          
+          hr(),
+          actionButton(
+            "run_pca",
+            "Run PCA",
+            icon = icon("play"),
+            class = "btn-primary btn-lg w-100"
+          )
+        ),
+        mainPanel(
+          conditionalPanel(
+            condition = "output.pca_computed",
+            card(
+              card_header("PCA Score Plot"),
+              card_body(
+                withSpinner(
+                  plotlyOutput("pca_plot", height = "600px"),
+                  type = 4,
+                  color = "#0dcaf0"
+                )
+              )
+            ),
+            br(),
+            layout_columns(
+              card(
+                card_header("Variance Explained"),
+                card_body(
+                  withSpinner(
+                    plotlyOutput("pca_scree", height = "300px"),
+                    type = 4,
+                    color = "#0dcaf0"
+                  )
+                )
+              ),
+              card(
+                card_header("PCA Summary"),
+                card_body(
+                  withSpinner(
+                    verbatimTextOutput("pca_summary"),
+                    type = 4,
+                    color = "#0dcaf0"
+                  )
+                )
+              ),
+              col_widths = c(6, 6)
+            )
+          ),
+          conditionalPanel(
+            condition = "!output.pca_computed",
+            card(
+              card_body(
+                div(
+                  style = "text-align: center; padding: 100px 20px; color: #999;",
+                  icon("project-diagram", style = "font-size: 72px;"),
+                  h3("No PCA Results Yet"),
+                  p("Upload data in the Upload/Rename tab, configure parameters, and click 'Run PCA'")
+                )
+              )
+            )
+          )
+        )
+      )
     )
   )
 }
@@ -665,28 +813,126 @@ ui <- function(request) {
 # SERVER
 # =================================================
 server <- function(input, output, session) {
+  # Helper function - null coalesce operator
+  `%||%` <- function(a, b) if (is.null(a)) b else a
+  
   # Initialize meta_out
   meta_out <- reactiveValues(data = NULL)
 
   # =================================================
-  # MANUAL SAVE BUTTON WITH PROGRESS
+  # GLOBAL SAVE BUTTON - MANUAL SAVE ONLY
   # =================================================
 
-  observeEvent(input$manual_save, {
+  observeEvent(input$save_now_global, {
     if (!is.null(data_rv$meta)) {
       tryCatch(
         {
-          # The storage module now handles the progress bar internally
-          storage$force_save(show_progress = TRUE)
-
           showNotification(
-            "Session saved successfully!",
-            type = "message",
-            duration = 2
+            "Preparing data for save...",
+            id = "saving",
+            duration = NULL,
+            type = "message"
           )
-          cat("Manual save triggered at:", format(Sys.time(), "%H:%M:%S"), "\n")
+          
+          # Get current metadata (including any edits)
+          current_meta <- data_rv$meta
+          if (!is.null(meta_out$data)) {
+            current_data_func <- meta_out$data()
+            if (!is.null(current_data_func)) {
+              current_meta <- current_data_func
+            }
+          }
+          
+          # Prepare data to save
+          save_data <- list(
+            metadata = current_meta,
+            counts = counts_rv$counts
+          )
+          
+          # Add DDS object if it exists (from PCA computation)
+          if (!is.null(pca_rv$pca_result) && !is.null(pca_rv$pca_result$dds)) {
+            save_data$dds <- pca_rv$pca_result$dds
+            showNotification(
+              "Including DESeq2 dataset...",
+              id = "saving",
+              duration = NULL,
+              type = "message"
+            )
+          }
+          
+          # Add VST-transformed counts if they exist
+          if (!is.null(pca_rv$pca_result) && !is.null(pca_rv$pca_result$vst)) {
+            save_data$vst_counts <- SummarizedExperiment::assay(pca_rv$pca_result$vst)
+            save_data$vst_result <- pca_rv$pca_result$vst  # Save full VST object for restoration
+            showNotification(
+              "Including VST-normalized counts...",
+              id = "saving",
+              duration = NULL,
+              type = "message"
+            )
+          }
+          
+          # Add PCA results if they exist
+          if (!is.null(pca_rv$pca_result)) {
+            save_data$pca_result <- list(
+              pca = pca_rv$pca_result$pca,
+              pca_data = pca_rv$pca_data,
+              var_explained = pca_rv$pca_result$var_explained,
+              ntop = pca_rv$pca_result$ntop
+            )
+            showNotification(
+              "Including PCA results...",
+              id = "saving",
+              duration = NULL,
+              type = "message"
+            )
+          }
+          
+          showNotification(
+            "Saving session to disk...",
+            id = "saving",
+            duration = NULL,
+            type = "message"
+          )
+          
+          # Save using custom save function
+          session_id <- isolate(storage$session_id())
+          if (is.null(session_id)) {
+            session_id <- storage$create_session()
+          }
+          
+          # Create session file
+          session_file <- file.path("saved_sessions", paste0(session_id, ".rds"))
+          
+          session_data <- list(
+            session_id = session_id,
+            file_data = list(
+              metadata = data_rv$orig_meta,
+              counts = data_rv$orig_counts
+            ),
+            current_edits = save_data,
+            file_name = isolate(storage$file_data()$file_name) %||% "data.RData",
+            timestamp = Sys.time(),
+            last_accessed = Sys.time()
+          )
+          
+          saveRDS(session_data, session_file)
+          
+          removeNotification("saving")
+          showNotification(
+            "Session saved successfully! All data, PCA, and DDS objects saved.",
+            type = "message",
+            duration = 3
+          )
+          cat("Manual save completed at:", format(Sys.time(), "%H:%M:%S"), "\n")
+          cat("  - Metadata:", nrow(save_data$metadata), "samples\n")
+          cat("  - Counts:", ncol(save_data$counts), "samples x", nrow(save_data$counts), "features\n")
+          if (!is.null(save_data$dds)) cat("  - DDS object included\n")
+          if (!is.null(save_data$vst_counts)) cat("  - VST counts included\n")
+          if (!is.null(save_data$pca_result)) cat("  - PCA results included\n")
         },
         error = function(e) {
+          removeNotification("saving")
           showNotification(
             paste("Save failed:", e$message),
             type = "error",
@@ -704,26 +950,26 @@ server <- function(input, output, session) {
   # SESSION END HANDLING
   # =================================================
 
-  # Force save on session end
-  session$onSessionEnded(function() {
-    cat("Session ended - forcing final save\n")
-    # Force immediate save (bypasses debounce)
-    if (!is.null(isolate(data_rv$meta))) {
-      storage$force_save()
-      cat("Final save completed\n")
-    }
-    stopApp()
-  })
+  # Session end save disabled - manual save only
+  # session$onSessionEnded(function() {
+  #   cat("Session ended - forcing final save\n")
+  #   # Force immediate save (bypasses debounce)
+  #   if (!is.null(isolate(data_rv$meta))) {
+  #     storage$force_save()
+  #     cat("Final save completed\n")
+  #   }
+  #   stopApp()
+  # })
 
-  # Also save periodically as backup (every 30 seconds)
-  observe({
-    invalidateLater(30000, session) # 30 seconds
-
-    if (!is.null(data_rv$meta)) {
-      cat("Periodic backup save at:", format(Sys.time(), "%H:%M:%S"), "\n")
-      storage$force_save()
-    }
-  })
+  # Periodic backup disabled - manual save only
+  # observe({
+  #   invalidateLater(30000, session) # 30 seconds
+  #
+  #   if (!is.null(data_rv$meta)) {
+  #     cat("Periodic backup save at:", format(Sys.time(), "%H:%M:%S"), "\n")
+  #     storage$force_save()
+  #   }
+  # })
 
   output$file_uploaded <- reactive({
     !is.null(data_rv$meta) || !is.null(input$file)
@@ -741,6 +987,13 @@ server <- function(input, output, session) {
   counts_rv <- reactiveValues(
     counts = NULL,
     orig_counts = NULL
+  )
+  
+  # Initialize PCA reactive values
+  pca_rv <- reactiveValues(
+    pca_result = NULL,
+    pca_data = NULL,
+    computed = FALSE
   )
 
   # Update counts_rv when data changes
@@ -868,6 +1121,31 @@ server <- function(input, output, session) {
         data_rv$orig_meta <- session_data$file_data$metadata
         data_rv$counts <- session_data$current_edits$counts
         data_rv$orig_counts <- session_data$file_data$counts
+        
+        # Restore PCA results if they exist
+        if (!is.null(session_data$current_edits$pca_result)) {
+          pca_rv$pca_result <- list(
+            pca = session_data$current_edits$pca_result$pca,
+            vst = session_data$current_edits$vst_result,
+            dds = session_data$current_edits$dds,
+            pca_data = session_data$current_edits$pca_result$pca_data,
+            var_explained = session_data$current_edits$pca_result$var_explained,
+            ntop = session_data$current_edits$pca_result$ntop
+          )
+          pca_rv$pca_data <- as.data.frame(session_data$current_edits$pca_result$pca_data)
+          pca_rv$computed <- TRUE
+          
+          showNotification(
+            "PCA results restored!",
+            type = "message",
+            duration = 3
+          )
+        } else {
+          # No PCA in saved session
+          pca_rv$pca_result <- NULL
+          pca_rv$pca_data <- NULL
+          pca_rv$computed <- FALSE
+        }
 
         removeNotification("loading_session")
         showNotification(
@@ -956,6 +1234,11 @@ server <- function(input, output, session) {
         data_rv$orig_meta <- meta
         data_rv$counts <- cnt
         data_rv$orig_counts <- cnt
+        
+        # Reset PCA on new file upload
+        pca_rv$pca_result <- NULL
+        pca_rv$pca_data <- NULL
+        pca_rv$computed <- FALSE
 
         # Use storage module to save initial data
         file_data <- list(
@@ -1010,6 +1293,402 @@ server <- function(input, output, session) {
       editableTableUI("meta"),
       linkedTableUI("counts", "Count Matrix (Live)")
     )
+  })
+  
+  # =================================================
+  # PCA ANALYSIS
+  # =================================================
+  
+  # Dynamic color variable dropdown
+  output$pca_color_ui <- renderUI({
+    req(data_rv$meta)
+    
+    # Get current metadata (including any edits)
+    current_meta <- data_rv$meta
+    if (!is.null(meta_out$data)) {
+      current_data <- meta_out$data()
+      if (!is.null(current_data)) {
+        current_meta <- current_data
+      }
+    }
+    
+    # Get all column names from metadata
+    color_choices <- colnames(current_meta)
+    
+    selectInput(
+      "pca_color_by",
+      "Color by:",
+      choices = color_choices,
+      selected = if("group" %in% color_choices) "group" else color_choices[1]
+    )
+  })
+  
+  # Run PCA analysis
+  observeEvent(input$run_pca, {
+    req(counts_rv$counts, data_rv$meta)
+    
+    showNotification(
+      "Running DESeq2 PCA with VST...",
+      id = "pca_running",
+      duration = NULL,
+      type = "message"
+    )
+    
+    tryCatch({
+      # Get CURRENT count matrix (reflects latest edits)
+      count_matrix <- as.matrix(counts_rv$counts)
+      
+      # Get current metadata
+      current_meta <- data_rv$meta
+      if (!is.null(meta_out$data)) {
+        current_data <- meta_out$data()
+        if (!is.null(current_data)) {
+          current_meta <- current_data
+        }
+      }
+      
+      # Ensure count matrix is integer (DESeq2 requirement)
+      count_matrix <- round(count_matrix)
+      
+      # Handle NA/Inf values
+      if (any(is.na(count_matrix)) || any(is.infinite(count_matrix))) {
+        showNotification(
+          "Warning: Replacing NA/Inf values with 0",
+          type = "warning",
+          duration = 3
+        )
+        count_matrix[is.na(count_matrix)] <- 0
+        count_matrix[is.infinite(count_matrix)] <- 0
+      }
+      
+      # Ensure all values are non-negative (DESeq2 requirement)
+      if (any(count_matrix < 0)) {
+        showNotification(
+          "Warning: Negative values found, converting to 0",
+          type = "warning",
+          duration = 3
+        )
+        count_matrix[count_matrix < 0] <- 0
+      }
+      
+      showNotification(
+        "Creating DESeq2 dataset...",
+        id = "pca_running",
+        duration = NULL,
+        type = "message"
+      )
+      
+      # Create a minimal colData (sample information) matching count matrix columns
+      # Ensure metadata is in the same order as count matrix columns
+      sample_labels <- colnames(count_matrix)
+      colData_df <- current_meta[match(sample_labels, current_meta$label), , drop = FALSE]
+      rownames(colData_df) <- colData_df$label
+      
+      # Create DESeqDataSet
+      dds <- DESeq2::DESeqDataSetFromMatrix(
+        countData = count_matrix,
+        colData = colData_df,
+        design = ~ 1  # No design needed for VST
+      )
+      
+      showNotification(
+        "Estimating size factors and dispersions...",
+        id = "pca_running",
+        duration = NULL,
+        type = "message"
+      )
+      
+      # Estimate size factors (needed for VST)
+      dds <- DESeq2::estimateSizeFactors(dds)
+      
+      # Estimate dispersions with user parameters
+      dds <- DESeq2::estimateDispersions(
+        dds, 
+        fitType = input$vst_fitType,
+        maxit = 100
+      )
+      
+      showNotification(
+        "Running Variance Stabilizing Transformation...",
+        id = "pca_running",
+        duration = NULL,
+        type = "message"
+      )
+      
+      # Apply Variance Stabilizing Transformation
+      # Note: VST only takes 'blind' parameter, not nsub or fitType
+      vst_result <- DESeq2::varianceStabilizingTransformation(
+        dds,
+        blind = input$vst_blind
+      )
+      
+      showNotification(
+        "Computing PCA...",
+        id = "pca_running",
+        duration = NULL,
+        type = "message"
+      )
+      
+      # Run PCA using DESeq2's plotPCA function data
+      pca_data <- DESeq2::plotPCA(
+        vst_result,
+        intgroup = "label",  # Just use label, we'll color by user choice later
+        returnData = TRUE,
+        ntop = input$pca_ntop
+      )
+      
+      # Get the full PCA object for variance explained
+      vst_mat <- SummarizedExperiment::assay(vst_result)
+      
+      # Select top genes by variance
+      rv <- matrixStats::rowVars(vst_mat)
+      select <- order(rv, decreasing = TRUE)[seq_len(min(input$pca_ntop, length(rv)))]
+      
+      # Run prcomp on the selected genes
+      pca_full <- prcomp(t(vst_mat[select, ]))
+      
+      # Extract PC coordinates (from plotPCA result, which are already computed)
+      pca_coords <- pca_data[, c("PC1", "PC2")]
+      
+      # Add all other PCs from the full PCA
+      if (ncol(pca_full$x) > 2) {
+        pca_coords <- cbind(pca_coords, pca_full$x[, 3:ncol(pca_full$x)])
+      }
+      
+      # Store results (includes DDS and VST for later saving)
+      pca_rv$pca_result <- list(
+        pca = pca_full,
+        vst = vst_result,
+        dds = dds,  # Store DDS object
+        pca_data = pca_coords,
+        var_explained = pca_full$sdev^2 / sum(pca_full$sdev^2) * 100,
+        ntop = input$pca_ntop
+      )
+      pca_rv$pca_data <- as.data.frame(pca_coords)
+      pca_rv$computed <- TRUE
+      
+      removeNotification("pca_running")
+      showNotification(
+        "DESeq2 PCA analysis complete!",
+        type = "message",
+        duration = 3
+      )
+      
+      # Track PCA run in email system with ALL parameters
+      pca_params_text <- paste(
+        sprintf("method=DESeq2_VST"),
+        sprintf("blind=%s", input$vst_blind),
+        sprintf("fitType=%s", input$vst_fitType),
+        sprintf("ntop=%d", input$pca_ntop),
+        sprintf("samples=%d", ncol(count_matrix)),
+        sprintf("total_features=%d", nrow(count_matrix)),
+        sprintf("features_used=%d", length(select)),
+        sprintf("PCs_computed=%d", ncol(pca_full$x)),
+        sep=", "
+      )
+      
+      email$track_change(
+        type = "PCA Analysis (DESeq2)",
+        details = glue::glue(
+          "Ran DESeq2 PCA with VST on current data\nParameters: {pca_params_text}"
+        )
+      )
+      
+    }, error = function(e) {
+      removeNotification("pca_running")
+      showNotification(
+        paste("PCA failed:", e$message),
+        type = "error",
+        duration = 10
+      )
+      cat("PCA Error Details:\n", e$message, "\n")
+      pca_rv$computed <- FALSE
+    })
+  })
+  
+  # Output flag for conditional panel
+  output$pca_computed <- reactive({
+    pca_rv$computed
+  })
+  outputOptions(output, "pca_computed", suspendWhenHidden = FALSE)
+  
+  # PCA Score Plot
+  output$pca_plot <- renderPlotly({
+    req(pca_rv$pca_result, input$pca_color_by)
+    
+    # Get current metadata
+    current_meta <- data_rv$meta
+    if (!is.null(meta_out$data)) {
+      current_data <- meta_out$data()
+      if (!is.null(current_data)) {
+        current_meta <- current_data
+      }
+    }
+    
+    # Get PC indices
+    pc_x <- as.integer(input$pca_pc_x)
+    pc_y <- as.integer(input$pca_pc_y)
+    
+    # Get PCA data from the stored result
+    pca_data <- pca_rv$pca_data
+    
+    # Ensure we have enough PCs
+    max_pc <- max(pc_x, pc_y)
+    if (ncol(pca_data) < max_pc) {
+      return(plotly_empty() %>% 
+        layout(title = "Not enough principal components available"))
+    }
+    
+    # Match samples with metadata
+    pca_data$sample <- rownames(pca_data)
+    
+    # Merge with metadata - handle when color_by is "label"
+    if (input$pca_color_by == "label") {
+      # If coloring by label, just add it from sample column
+      plot_data <- pca_data
+      plot_data$label <- plot_data$sample
+    } else {
+      # Merge with metadata for other columns
+      plot_data <- merge(
+        pca_data,
+        current_meta,
+        by.x = "sample",
+        by.y = "label",
+        all.x = TRUE
+      )
+    }
+    
+    # Get color variable
+    color_var <- plot_data[[input$pca_color_by]]
+    
+    # Get variance explained from stored result
+    var_explained <- pca_rv$pca_result$var_explained
+    
+    # Create plot
+    pc_x_col <- paste0("PC", pc_x)
+    pc_y_col <- paste0("PC", pc_y)
+    
+    p <- plot_ly(
+      plot_data,
+      x = ~get(pc_x_col),
+      y = ~get(pc_y_col),
+      color = color_var,
+      colors = "Set2",
+      type = "scatter",
+      mode = "markers",
+      marker = list(size = 10, line = list(color = "white", width = 1)),
+      text = ~paste(
+        "Sample:", sample,
+        "<br>", input$pca_color_by, ":", color_var
+      ),
+      hoverinfo = "text"
+    ) %>%
+      layout(
+        title = "DESeq2 PCA Score Plot (VST)",
+        xaxis = list(
+          title = sprintf("PC%d (%.1f%% variance)", pc_x, var_explained[pc_x]),
+          zeroline = TRUE
+        ),
+        yaxis = list(
+          title = sprintf("PC%d (%.1f%% variance)", pc_y, var_explained[pc_y]),
+          zeroline = TRUE
+        ),
+        hovermode = "closest",
+        plot_bgcolor = "#f8f9fa",
+        paper_bgcolor = "white"
+      )
+    
+    p
+  })
+  
+  # Scree Plot
+  output$pca_scree <- renderPlotly({
+    req(pca_rv$pca_result)
+    
+    # Get variance explained from stored result
+    var_explained <- pca_rv$pca_result$var_explained
+    
+    # Create data frame
+    scree_data <- data.frame(
+      PC = 1:length(var_explained),
+      Variance = var_explained,
+      Cumulative = cumsum(var_explained)
+    )
+    
+    # Limit to first 20 PCs for readability
+    if (nrow(scree_data) > 20) {
+      scree_data <- scree_data[1:20, ]
+    }
+    
+    p <- plot_ly(scree_data) %>%
+      add_bars(
+        x = ~PC,
+        y = ~Variance,
+        name = "Individual",
+        marker = list(color = "#0dcaf0")
+      ) %>%
+      add_lines(
+        x = ~PC,
+        y = ~Cumulative,
+        name = "Cumulative",
+        yaxis = "y2",
+        line = list(color = "#dc3545", width = 3)
+      ) %>%
+      layout(
+        title = "Variance Explained by Principal Components (DESeq2 VST)",
+        xaxis = list(title = "Principal Component", dtick = 1),
+        yaxis = list(
+          title = "Variance Explained (%)",
+          side = "left"
+        ),
+        yaxis2 = list(
+          title = "Cumulative Variance (%)",
+          overlaying = "y",
+          side = "right"
+        ),
+        hovermode = "x unified",
+        plot_bgcolor = "#f8f9fa",
+        paper_bgcolor = "white",
+        showlegend = TRUE
+      )
+    
+    p
+  })
+  
+  # PCA Summary
+  output$pca_summary <- renderPrint({
+    req(pca_rv$pca_result)
+    
+    cat("DESeq2 PCA Summary\n")
+    cat("==================\n\n")
+    
+    cat("Method: Variance Stabilizing Transformation (VST)\n\n")
+    
+    # Get variance info
+    var_explained <- pca_rv$pca_result$var_explained
+    pca_obj <- pca_rv$pca_result$pca
+    
+    cat("Number of samples:", nrow(pca_obj$x), "\n")
+    cat("Top genes used:", pca_rv$pca_result$ntop, "\n")
+    cat("Number of PCs computed:", ncol(pca_obj$x), "\n\n")
+    
+    cat("Variance Explained (%):\n")
+    n_show <- min(10, length(var_explained))
+    for (i in 1:n_show) {
+      cat(sprintf("  PC%d: %.2f%%\n", i, var_explained[i]))
+    }
+    
+    if (length(var_explained) > n_show) {
+      cat(sprintf("  ... and %d more PCs\n", length(var_explained) - n_show))
+    }
+    
+    cat(sprintf("\nTotal variance explained by first %d PCs: %.2f%%\n",
+                n_show, sum(var_explained[1:n_show])))
+    
+    cat("\nVST Parameters:\n")
+    cat("  Blind:", input$vst_blind, "\n")
+    cat("  Fit type:", input$vst_fitType, "\n")
+    cat("  Top genes (ntop):", input$pca_ntop, "\n")
   })
 }
 
