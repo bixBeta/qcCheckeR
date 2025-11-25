@@ -16,7 +16,8 @@ required_packages <- c(
   "ggplot2",
   "DESeq2",
   "matrixStats",
-  "shinyjqui"
+  "shinyjqui",
+  "viridisLite"
 )
 
 # Install missing packages
@@ -774,195 +775,115 @@ ui <- function(request) {
       "PCA Analysis",
       value = "pca",
       icon = icon("project-diagram"),
-      fluidRow(
-        # Left Sidebar - PCA Parameters
-        column(
-          width = 3,
-          wellPanel(
-            h4("PCA Parameters"),
-            p("Using DESeq2 PCA with Variance Stabilizing Transformation", 
-              style = "font-size: 0.9em; color: #666;"),
-            hr(),
-            
-            # DESeq2 VST parameters
-            checkboxInput(
-              "vst_blind",
-              "Blind to experimental design",
-              value = TRUE
-            ),
-            helpText("Ignore sample information for exploratory PCA."),
-            
-            selectInput(
-              "vst_fitType",
-              "Dispersion fit type",
-              choices = c("parametric", "local", "mean"),
-              selected = "parametric"
-            ),
-            helpText("Method for fitting dispersion-mean relationship."),
-            
-            numericInput(
-              "pca_ntop",
-              "Top variable genes",
-              value = 500,
-              min = 100,
-              step = 100
-            ),
-            helpText("Number of top genes by variance to use for PCA."),
-            
-            hr(),
-            
-            selectInput(
-              "pca_pc_x",
-              "X-axis PC:",
-              choices = c("PC1" = 1, "PC2" = 2, "PC3" = 3, "PC4" = 4, "PC5" = 5),
-              selected = 1
-            ),
-            
-            selectInput(
-              "pca_pc_y",
-              "Y-axis PC:",
-              choices = c("PC1" = 1, "PC2" = 2, "PC3" = 3, "PC4" = 4, "PC5" = 5),
-              selected = 2
-            ),
-            
-            uiOutput("pca_color_ui"),
-            
-            hr(),
-            actionButton(
-              "run_pca",
-              "Run PCA",
-              icon = icon("play"),
-              class = "btn-primary btn-lg w-100"
-            )
-          )
-        ),
-        
-        # Main Panel
-        column(
-          width = 6,
-          conditionalPanel(
-            condition = "output.pca_computed",
-            jqui_resizable(
-              card(
-                card_header("PCA Score Plot"),
-                card_body(
-                  withSpinner(
-                    plotlyOutput("pca_plot", width = "100%", height = "100%"),
-                    type = 4,
-                    color = "#0dcaf0"
-                  )
-                )
-              ),
-              options = list(
-                minWidth = 400,
-                minHeight = 400,
-                maxWidth = 2000,
-                maxHeight = 1500,
-                helper = "resizable-helper"
-              )
-            ),
-            br(),
-            layout_columns(
-              card(
-                card_header("Variance Explained"),
-                card_body(
-                  withSpinner(
-                    plotlyOutput("pca_scree", width = "100%", height = "400px"),
-                    type = 4,
-                    color = "#0dcaf0"
-                  )
-                )
-              ),
-              card(
-                card_header("PCA Summary"),
-                card_body(
-                  withSpinner(
-                    verbatimTextOutput("pca_summary"),
-                    type = 4,
-                    color = "#0dcaf0"
-                  )
-                )
-              ),
-              col_widths = c(6, 6)
-            )
+      page_sidebar(
+        sidebar = sidebar(
+          width = 350,
+          h4("PCA Parameters"),
+          p("Using DESeq2 PCA with Variance Stabilizing Transformation", 
+            style = "font-size: 0.9em; color: #666;"),
+          hr(),
+          
+          # DESeq2 VST parameters
+          checkboxInput(
+            "vst_blind",
+            "Blind to experimental design",
+            value = TRUE
           ),
-          conditionalPanel(
-            condition = "!output.pca_computed",
-            card(
-              card_body(
-                div(
-                  style = "text-align: center; padding: 100px 20px; color: #999;",
-                  icon("project-diagram", style = "font-size: 72px;"),
-                  h3("No PCA Results Yet"),
-                  p("Upload data in the Upload/Rename tab, configure parameters, and click 'Run PCA'")
-                )
-              )
-            )
+          helpText("Ignore sample information for exploratory PCA."),
+          
+          selectInput(
+            "vst_fitType",
+            "Dispersion fit type",
+            choices = c("parametric", "local", "mean"),
+            selected = "parametric"
+          ),
+          helpText("Method for fitting dispersion-mean relationship."),
+          
+          numericInput(
+            "pca_ntop",
+            "Top variable genes",
+            value = 500,
+            min = 100,
+            step = 100
+          ),
+          helpText("Number of top genes by variance to use for PCA."),
+          
+          hr(),
+          
+          selectInput(
+            "pca_pc_x",
+            "X-axis PC:",
+            choices = c("PC1" = 1, "PC2" = 2, "PC3" = 3, "PC4" = 4, "PC5" = 5),
+            selected = 1
+          ),
+          
+          selectInput(
+            "pca_pc_y",
+            "Y-axis PC:",
+            choices = c("PC1" = 1, "PC2" = 2, "PC3" = 3, "PC4" = 4, "PC5" = 5),
+            selected = 2
+          ),
+          
+          uiOutput("pca_color_ui"),
+          
+          hr(),
+          actionButton(
+            "run_pca",
+            "Run PCA",
+            icon = icon("play"),
+            class = "btn-primary btn-lg w-100"
           )
         ),
         
-        # Right Sidebar - Plot Customization
-        column(
-          width = 3,
-          conditionalPanel(
-            condition = "output.pca_computed",
-            wellPanel(
-              h4("Plot Customization"),
-              hr(),
-              
-              # Title
-              textInput(
-                "plot_title",
-                "Plot Title:",
-                value = "PCA Score Plot"
-              ),
-              
-              # Axis labels
-              textInput(
-                "plot_xlabel",
-                "X-axis Label:",
-                value = "PC1"
-              ),
-              
-              textInput(
-                "plot_ylabel",
-                "Y-axis Label:",
-                value = "PC2"
-              ),
-              
-              hr(),
-              
-              # Point size
-              sliderInput(
-                "plot_point_size",
-                "Point Size:",
-                min = 3,
-                max = 20,
-                value = 10,
-                step = 1
-              ),
-              
-              # Point opacity
-              sliderInput(
-                "plot_point_opacity",
-                "Point Opacity:",
-                min = 0.1,
-                max = 1,
-                value = 1,
-                step = 0.1
-              ),
-              
-              # Color palette
-              selectInput(
-                "plot_color_palette",
-                "Color Palette:",
-                choices = c(
-                  "Set2" = "Set2",
-                  "Set1" = "Set1",
-                  "Set3" = "Set3",
-                  "Pastel1" = "Pastel1",
-                  "Pastel2" = "Pastel2",
-                  "Dark2" = "Dark2",
+        # Main content with right sidebar
+        layout_sidebar(
+          sidebar = sidebar(
+            id = "plot_customization_sidebar",
+            position = "right",
+            width = 300,
+            h4("Plot Customization"),
+            hr(),
+            
+            # Title
+            textInput(
+              "plot_title",
+              "Plot Title:",
+              value = "PCA Score Plot"
+            ),
+            
+            hr(),
+            
+            # Point size
+            sliderInput(
+              "plot_point_size",
+              "Point Size:",
+              min = 3,
+              max = 20,
+              value = 10,
+              step = 1
+            ),
+            
+            # Point opacity
+            sliderInput(
+              "plot_point_opacity",
+              "Point Opacity:",
+              min = 0.1,
+              max = 1,
+              value = 1,
+              step = 0.1
+            ),
+            
+            # Color palette
+            selectInput(
+              "plot_color_palette",
+              "Color Palette:",
+              choices = c(
+                "Set2" = "Set2",
+                "Set1" = "Set1",
+                "Set3" = "Set3",
+                "Pastel1" = "Pastel1",
+                "Pastel2" = "Pastel2",
+                "Dark2" = "Dark2",
                 "Accent" = "Accent",
                 "Paired" = "Paired",
                 "Viridis" = "Viridis",
@@ -1010,12 +931,63 @@ ui <- function(request) {
               icon = icon("undo"),
               class = "btn-secondary btn-sm w-100"
             )
-          )  # Close wellPanel
-        )  # Close conditionalPanel
-      )  # Close column (right sidebar)
-    )  # Close fluidRow
-  )  # Close tabPanel
-)  # Close navbarPage
+          ),
+          
+          # Main content area
+          conditionalPanel(
+            condition = "output.pca_computed",
+            card(
+              card_header("PCA Score Plot"),
+              card_body(
+                withSpinner(
+                  plotlyOutput("pca_plot", width = "100%", height = "600px"),
+                  type = 4,
+                  color = "#0dcaf0"
+                )
+              )
+            ),
+            br(),
+            layout_columns(
+              card(
+                card_header("Variance Explained"),
+                card_body(
+                  withSpinner(
+                    plotlyOutput("pca_scree", width = "100%", height = "400px"),
+                    type = 4,
+                    color = "#0dcaf0"
+                  )
+                )
+              ),
+              card(
+                card_header("PCA Summary"),
+                card_body(
+                  withSpinner(
+                    verbatimTextOutput("pca_summary"),
+                    type = 4,
+                    color = "#0dcaf0"
+                  )
+                )
+              ),
+              col_widths = c(6, 6)
+            )
+          ),
+          conditionalPanel(
+            condition = "!output.pca_computed",
+            card(
+              card_body(
+                div(
+                  style = "text-align: center; padding: 100px 20px; color: #999;",
+                  icon("project-diagram", style = "font-size: 72px;"),
+                  h3("No PCA Results Yet"),
+                  p("Upload data in the Upload/Rename tab, configure parameters, and click 'Run PCA'")
+                )
+              )
+            )
+          )
+        )  # Close layout_sidebar
+      )  # Close page_sidebar
+    )  # Close tabPanel (PCA Analysis)
+  )  # Close navbarPage
 }
 
 # =================================================
@@ -1725,8 +1697,6 @@ server <- function(input, output, session) {
   # Reset plot options to defaults
   observeEvent(input$reset_plot_options, {
     updateTextInput(session, "plot_title", value = "PCA Score Plot")
-    updateTextInput(session, "plot_xlabel", value = "PC1")
-    updateTextInput(session, "plot_ylabel", value = "PC2")
     updateSliderInput(session, "plot_point_size", value = 10)
     updateSliderInput(session, "plot_point_opacity", value = 1)
     updateSelectInput(session, "plot_color_palette", selected = "Set2")
@@ -1735,31 +1705,6 @@ server <- function(input, output, session) {
     updateSelectInput(session, "plot_bg_color", selected = "#f8f9fa")
     
     showNotification("Plot options reset to defaults", type = "message", duration = 2)
-  })
-  
-  # Auto-update axis labels when PC selection changes
-  observeEvent(input$pca_pc_x, {
-    if (!is.null(pca_rv$pca_result)) {
-      pc_x <- as.integer(input$pca_pc_x)
-      var_explained <- pca_rv$pca_result$var_explained
-      updateTextInput(
-        session, 
-        "plot_xlabel", 
-        value = sprintf("PC%d (%.1f%% variance)", pc_x, var_explained[pc_x])
-      )
-    }
-  })
-  
-  observeEvent(input$pca_pc_y, {
-    if (!is.null(pca_rv$pca_result)) {
-      pc_y <- as.integer(input$pca_pc_y)
-      var_explained <- pca_rv$pca_result$var_explained
-      updateTextInput(
-        session, 
-        "plot_ylabel", 
-        value = sprintf("PC%d (%.1f%% variance)", pc_y, var_explained[pc_y])
-      )
-    }
   })
   
   # PCA Score Plot
@@ -1816,14 +1761,32 @@ server <- function(input, output, session) {
     
     # Get customization options (with defaults if not set)
     plot_title <- if (!is.null(input$plot_title)) input$plot_title else "PCA Score Plot"
-    plot_xlabel <- if (!is.null(input$plot_xlabel)) input$plot_xlabel else sprintf("PC%d (%.1f%% variance)", pc_x, var_explained[pc_x])
-    plot_ylabel <- if (!is.null(input$plot_ylabel)) input$plot_ylabel else sprintf("PC%d (%.1f%% variance)", pc_y, var_explained[pc_y])
+    # Always show variance percentage on axes
+    plot_xlabel <- sprintf("PC%d (%.1f%% variance)", pc_x, var_explained[pc_x])
+    plot_ylabel <- sprintf("PC%d (%.1f%% variance)", pc_y, var_explained[pc_y])
     point_size <- if (!is.null(input$plot_point_size)) input$plot_point_size else 10
     point_opacity <- if (!is.null(input$plot_point_opacity)) input$plot_point_opacity else 1
     color_palette <- if (!is.null(input$plot_color_palette)) input$plot_color_palette else "Set2"
     show_grid <- if (!is.null(input$plot_show_grid)) input$plot_show_grid else FALSE
     show_legend <- if (!is.null(input$plot_show_legend)) input$plot_show_legend else TRUE
     bg_color <- if (!is.null(input$plot_bg_color)) input$plot_bg_color else "#f8f9fa"
+    
+    # Handle color palettes - viridis scales need special treatment
+    if (color_palette %in% c("Viridis", "Plasma", "Inferno", "Magma")) {
+      # Use viridis color scales
+      viridis_option <- switch(color_palette,
+        "Viridis" = "D",
+        "Plasma" = "C",
+        "Inferno" = "B",
+        "Magma" = "A"
+      )
+      # Get number of unique groups
+      n_colors <- length(unique(color_var))
+      color_values <- viridisLite::viridis(n_colors, option = viridis_option)
+    } else {
+      # Use RColorBrewer palettes
+      color_values <- color_palette
+    }
     
     # Create plot
     pc_x_col <- paste0("PC", pc_x)
@@ -1834,7 +1797,7 @@ server <- function(input, output, session) {
       x = ~get(pc_x_col),
       y = ~get(pc_y_col),
       color = color_var,
-      colors = color_palette,
+      colors = color_values,
       type = "scatter",
       mode = "markers",
       marker = list(
