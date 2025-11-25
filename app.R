@@ -17,7 +17,8 @@ required_packages <- c(
   "DESeq2",
   "matrixStats",
   "shinyjqui",
-  "viridisLite"
+  "viridisLite",
+  "webshot2"
 )
 
 # Install missing packages
@@ -835,140 +836,75 @@ ui <- function(request) {
           )
         ),
         
-        # Main content with right sidebar
-        layout_sidebar(
-          sidebar = sidebar(
-            id = "plot_customization_sidebar",
-            position = "right",
-            width = 300,
-            h4("Plot Customization"),
-            hr(),
-            
-            # Title
-            textInput(
-              "plot_title",
-              "Plot Title:",
-              value = "PCA Score Plot"
-            ),
-            
-            hr(),
-            
-            # Point size
-            sliderInput(
-              "plot_point_size",
-              "Point Size:",
-              min = 3,
-              max = 20,
-              value = 10,
-              step = 1
-            ),
-            
-            # Point opacity
-            sliderInput(
-              "plot_point_opacity",
-              "Point Opacity:",
-              min = 0.1,
-              max = 1,
-              value = 1,
-              step = 0.1
-            ),
-            
-            # Color palette
-            selectInput(
-              "plot_color_palette",
-              "Color Palette:",
-              choices = c(
-                "Set2" = "Set2",
-                "Set1" = "Set1",
-                "Set3" = "Set3",
-                "Pastel1" = "Pastel1",
-                "Pastel2" = "Pastel2",
-                "Dark2" = "Dark2",
-                "Accent" = "Accent",
-                "Paired" = "Paired",
-                "Viridis" = "Viridis",
-                "Plasma" = "Plasma",
-                "Inferno" = "Inferno",
-                "Magma" = "Magma"
-              ),
-              selected = "Set2"
-            ),
-            
-            hr(),
-            
-            # Show/hide elements
-            checkboxInput(
-              "plot_show_grid",
-              "Show Grid",
-              value = FALSE
-            ),
-            
-            checkboxInput(
-              "plot_show_legend",
-              "Show Legend",
-              value = TRUE
-            ),
-            
-            # Background colors
-            selectInput(
-              "plot_bg_color",
-              "Background Color:",
-              choices = c(
-                "Light Gray" = "#f8f9fa",
-                "White" = "white",
-                "Light Blue" = "#f0f8ff",
-                "Light Yellow" = "#fffef0",
-                "Light Green" = "#f0fff0"
-              ),
-              selected = "#f8f9fa"
-            ),
-            
-            hr(),
-            
-            actionButton(
-              "reset_plot_options",
-              "Reset to Defaults",
-              icon = icon("undo"),
-              class = "btn-secondary btn-sm w-100"
-            )
-          ),
-          
-          # Main content area
-          conditionalPanel(
-            condition = "output.pca_computed",
-            card(
-              card_header("PCA Score Plot"),
-              card_body(
-                withSpinner(
-                  plotlyOutput("pca_plot", width = "100%", height = "600px"),
-                  type = 4,
-                  color = "#0dcaf0"
+        # Main content area
+        conditionalPanel(
+          condition = "output.pca_computed",
+          card(
+              full_screen = TRUE,
+              card_header("PCA Results"),
+              layout_sidebar(
+                sidebar = sidebar(
+                  id = "plot_customization_sidebar",
+                  position = "right",
+                  width = 280,
+                  open = TRUE,
+                  h4("Plot Options"),
+                  
+                  textInput("plot_title", "Title:", value = "PCA Score Plot"),
+                  sliderInput("plot_point_size", "Point Size:", min = 3, max = 20, value = 10, step = 1),
+                  sliderInput("plot_point_opacity", "Opacity:", min = 0.1, max = 1, value = 1, step = 0.1),
+                  selectInput("plot_color_palette", "Palette:",
+                    choices = c("Set2" = "Set2", "Set1" = "Set1", "Set3" = "Set3",
+                               "Pastel1" = "Pastel1", "Pastel2" = "Pastel2", "Dark2" = "Dark2",
+                               "Accent" = "Accent", "Paired" = "Paired",
+                               "Viridis" = "Viridis", "Plasma" = "Plasma",
+                               "Inferno" = "Inferno", "Magma" = "Magma"),
+                    selected = "Set2"
+                  ),
+                  checkboxInput("plot_show_grid", "Show Grid", value = FALSE),
+                  checkboxInput("plot_show_legend", "Show Legend", value = TRUE),
+                  selectInput("plot_bg_color", "Background:",
+                    choices = c("Light Gray" = "#f8f9fa", "White" = "white",
+                               "Light Blue" = "#f0f8ff", "Light Yellow" = "#fffef0",
+                               "Light Green" = "#f0fff0"),
+                    selected = "#f8f9fa"
+                  ),
+                  hr(),
+                  actionButton("open_download_modal", "Download", icon = icon("download"),
+                             class = "btn-success w-100 btn-sm"),
+                  actionButton("reset_plot_options", "Reset", icon = icon("undo"),
+                             class = "btn-secondary w-100 btn-sm", style = "margin-top: 5px;")
+                ),
+                
+                # Tabbed content
+                navset_card_tab(
+                  id = "pca_tabs",
+                  nav_panel(
+                    "PCA Score Plot",
+                    withSpinner(
+                      plotlyOutput("pca_plot", width = "100%", height = "700px"),
+                      type = 4,
+                      color = "#0dcaf0"
+                    )
+                  ),
+                  nav_panel(
+                    "Variance Explained",
+                    withSpinner(
+                      plotlyOutput("pca_scree", width = "100%", height = "700px"),
+                      type = 4,
+                      color = "#0dcaf0"
+                    )
+                  ),
+                  nav_panel(
+                    "PCA Summary",
+                    withSpinner(
+                      verbatimTextOutput("pca_summary"),
+                      type = 4,
+                      color = "#0dcaf0"
+                    )
+                  )
                 )
               )
-            ),
-            br(),
-            layout_columns(
-              card(
-                card_header("Variance Explained"),
-                card_body(
-                  withSpinner(
-                    plotlyOutput("pca_scree", width = "100%", height = "400px"),
-                    type = 4,
-                    color = "#0dcaf0"
-                  )
-                )
-              ),
-              card(
-                card_header("PCA Summary"),
-                card_body(
-                  withSpinner(
-                    verbatimTextOutput("pca_summary"),
-                    type = 4,
-                    color = "#0dcaf0"
-                  )
-                )
-              ),
-              col_widths = c(6, 6)
             )
           ),
           conditionalPanel(
@@ -984,11 +920,58 @@ ui <- function(request) {
               )
             )
           )
-        )  # Close layout_sidebar
       )  # Close page_sidebar
     )  # Close tabPanel (PCA Analysis)
   )  # Close navbarPage
 }
+
+# =================================================
+# DOWNLOAD MODAL
+# =================================================
+download_modal <- modalDialog(
+  title = "Download PCA Plot",
+  size = "m",
+  
+  textInput(
+    "plot_download_filename",
+    "Filename:",
+    value = "pca_plot",
+    placeholder = "Enter filename (no extension)"
+  ),
+  
+  selectInput(
+    "plot_download_format",
+    "File Format:",
+    choices = c(
+      "PNG (recommended)" = "png",
+      "HTML (interactive)" = "html"
+    ),
+    selected = "png"
+  ),
+  
+  numericInput(
+    "plot_download_width",
+    "Width (pixels):",
+    value = 1200,
+    min = 400,
+    max = 4000,
+    step = 100
+  ),
+  
+  numericInput(
+    "plot_download_height",
+    "Height (pixels):",
+    value = 800,
+    min = 400,
+    max = 4000,
+    step = 100
+  ),
+  
+  footer = tagList(
+    modalButton("Cancel"),
+    downloadButton("download_pca_plot", "Download", class = "btn-success")
+  )
+)
 
 # =================================================
 # SERVER
@@ -1054,7 +1037,16 @@ server <- function(input, output, session) {
               pca_data = pca_rv$pca_data,
               var_explained = pca_rv$pca_result$var_explained,
               ntop = pca_rv$pca_result$ntop,
-              params_used = pca_rv$pca_result$params_used  # Save parameters used
+              params_used = pca_rv$pca_result$params_used,  # Save parameters used
+              plot_settings = list(  # Save plot customization settings
+                title = input$plot_title,
+                point_size = input$plot_point_size,
+                point_opacity = input$plot_point_opacity,
+                color_palette = input$plot_color_palette,
+                show_grid = input$plot_show_grid,
+                show_legend = input$plot_show_legend,
+                bg_color = input$plot_bg_color
+              )
             )
           }
           
@@ -1310,6 +1302,18 @@ server <- function(input, output, session) {
           )
           pca_rv$pca_data <- as.data.frame(session_data$current_edits$pca_result$pca_data)
           pca_rv$computed <- TRUE
+          
+          # Restore plot settings if they exist
+          if (!is.null(session_data$current_edits$pca_result$plot_settings)) {
+            plot_settings <- session_data$current_edits$pca_result$plot_settings
+            updateTextInput(session, "plot_title", value = plot_settings$title %||% "PCA Score Plot")
+            updateSliderInput(session, "plot_point_size", value = plot_settings$point_size %||% 10)
+            updateSliderInput(session, "plot_point_opacity", value = plot_settings$point_opacity %||% 1)
+            updateSelectInput(session, "plot_color_palette", selected = plot_settings$color_palette %||% "Set2")
+            updateCheckboxInput(session, "plot_show_grid", value = plot_settings$show_grid %||% FALSE)
+            updateCheckboxInput(session, "plot_show_legend", value = plot_settings$show_legend %||% TRUE)
+            updateSelectInput(session, "plot_bg_color", selected = plot_settings$bg_color %||% "#f8f9fa")
+          }
           
           showNotification(
             "PCA results restored!",
@@ -1694,6 +1698,203 @@ server <- function(input, output, session) {
   })
   outputOptions(output, "pca_computed", suspendWhenHidden = FALSE)
   
+  # Show download modal
+  observeEvent(input$open_download_modal, {
+    showModal(download_modal)
+  })
+  
+  # Download PCA plot handler
+  output$download_pca_plot <- downloadHandler(
+    filename = function() {
+      filename <- if (!is.null(input$plot_download_filename) && input$plot_download_filename != "") {
+        input$plot_download_filename
+      } else {
+        "pca_plot"
+      }
+      format <- if (!is.null(input$plot_download_format)) {
+        input$plot_download_format
+      } else {
+        "png"
+      }
+      paste0(filename, ".", format)
+    },
+    content = function(file) {
+      req(pca_rv$pca_result, input$pca_color_by)
+      
+      # Get current metadata
+      current_meta <- data_rv$meta
+      if (!is.null(meta_out$data)) {
+        current_data <- meta_out$data()
+        if (!is.null(current_data)) {
+          current_meta <- current_data
+        }
+      }
+      
+      # Get PC indices
+      pc_x <- as.integer(input$pca_pc_x)
+      pc_y <- as.integer(input$pca_pc_y)
+      
+      # Get PCA data
+      pca_data <- pca_rv$pca_data
+      pca_data$sample <- rownames(pca_data)
+      
+      # Merge with metadata
+      if (input$pca_color_by == "label") {
+        plot_data <- pca_data
+        plot_data$label <- plot_data$sample
+      } else {
+        plot_data <- merge(
+          pca_data,
+          current_meta,
+          by.x = "sample",
+          by.y = "label",
+          all.x = TRUE
+        )
+      }
+      
+      # Get color variable
+      color_var <- plot_data[[input$pca_color_by]]
+      
+      # Get variance explained
+      var_explained <- pca_rv$pca_result$var_explained
+      
+      # Get customization options
+      plot_title <- if (!is.null(input$plot_title)) input$plot_title else "PCA Score Plot"
+      plot_xlabel <- sprintf("PC%d (%.1f%% variance)", pc_x, var_explained[pc_x])
+      plot_ylabel <- sprintf("PC%d (%.1f%% variance)", pc_y, var_explained[pc_y])
+      point_size <- if (!is.null(input$plot_point_size)) input$plot_point_size else 10
+      point_opacity <- if (!is.null(input$plot_point_opacity)) input$plot_point_opacity else 1
+      color_palette <- if (!is.null(input$plot_color_palette)) input$plot_color_palette else "Set2"
+      show_grid <- if (!is.null(input$plot_show_grid)) input$plot_show_grid else FALSE
+      show_legend <- if (!is.null(input$plot_show_legend)) input$plot_show_legend else TRUE
+      bg_color <- if (!is.null(input$plot_bg_color)) input$plot_bg_color else "#f8f9fa"
+      
+      # Handle color palettes
+      if (color_palette %in% c("Viridis", "Plasma", "Inferno", "Magma")) {
+        viridis_option <- switch(color_palette,
+          "Viridis" = "D", "Plasma" = "C", "Inferno" = "B", "Magma" = "A"
+        )
+        n_colors <- length(unique(color_var))
+        color_values <- viridisLite::viridis(n_colors, option = viridis_option)
+      } else {
+        color_values <- color_palette
+      }
+      
+      # Create plot
+      pc_x_col <- paste0("PC", pc_x)
+      pc_y_col <- paste0("PC", pc_y)
+      
+      p <- plot_ly(
+        plot_data,
+        x = ~get(pc_x_col),
+        y = ~get(pc_y_col),
+        color = color_var,
+        colors = color_values,
+        type = "scatter",
+        mode = "markers",
+        marker = list(
+          size = point_size, 
+          opacity = point_opacity,
+          line = list(color = "white", width = 1)
+        ),
+        text = ~paste(
+          "Sample:", sample,
+          "<br>", input$pca_color_by, ":", color_var
+        ),
+        hoverinfo = "text",
+        width = input$plot_download_width %||% 1200,
+        height = input$plot_download_height %||% 800
+      ) %>%
+        layout(
+          title = plot_title,
+          xaxis = list(
+            title = plot_xlabel,
+            zeroline = TRUE,
+            showgrid = show_grid
+          ),
+          yaxis = list(
+            title = plot_ylabel,
+            zeroline = TRUE,
+            showgrid = show_grid
+          ),
+          hovermode = "closest",
+          plot_bgcolor = bg_color,
+          paper_bgcolor = "white",
+          showlegend = show_legend
+        )
+      
+      # Get download dimensions and format
+      width <- if (!is.null(input$plot_download_width)) {
+        input$plot_download_width
+      } else {
+        1200
+      }
+      
+      height <- if (!is.null(input$plot_download_height)) {
+        input$plot_download_height
+      } else {
+        800
+      }
+      
+      format <- if (!is.null(input$plot_download_format)) {
+        input$plot_download_format
+      } else {
+        "png"
+      }
+      
+      # Get format
+      format <- input$plot_download_format %||% "png"
+      
+      # Set plot dimensions
+      p <- p %>% 
+        plotly::config(
+          toImageButtonOptions = list(
+            width = input$plot_download_width %||% 1200,
+            height = input$plot_download_height %||% 800
+          )
+        )
+      
+      # Export based on format
+      if (format == "html") {
+        # HTML - always works, interactive
+        htmlwidgets::saveWidget(plotly::as_widget(p), file, selfcontained = TRUE)
+        removeModal()
+        showNotification("Plot downloaded as interactive HTML", type = "message", duration = 3)
+      } else {
+        # PNG - use webshot2 for reliable screenshot
+        if (!requireNamespace("webshot2", quietly = TRUE)) {
+          # Fallback to HTML if webshot2 not available
+          html_file <- paste0(tools::file_path_sans_ext(file), ".html")
+          htmlwidgets::saveWidget(plotly::as_widget(p), html_file, selfcontained = TRUE)
+          file.copy(html_file, file)
+          file.remove(html_file)
+          removeModal()
+          showNotification(
+            "webshot2 package not installed. Saved as HTML. Install with: install.packages('webshot2')",
+            type = "warning",
+            duration = 8
+          )
+        } else {
+          # Use webshot2 to capture PNG
+          temp_html <- tempfile(fileext = ".html")
+          htmlwidgets::saveWidget(plotly::as_widget(p), temp_html, selfcontained = TRUE)
+          
+          webshot2::webshot(
+            temp_html, 
+            file = file,
+            vwidth = input$plot_download_width %||% 1200,
+            vheight = input$plot_download_height %||% 800,
+            delay = 1
+          )
+          
+          file.remove(temp_html)
+          removeModal()
+          showNotification("Plot downloaded as PNG", type = "message", duration = 3)
+        }
+      }
+    }
+  )
+  
   # Reset plot options to defaults
   observeEvent(input$reset_plot_options, {
     updateTextInput(session, "plot_title", value = "PCA Score Plot")
@@ -1830,15 +2031,7 @@ server <- function(input, output, session) {
         autosize = TRUE
       ) %>%
       config(
-        displayModeBar = TRUE,
-        displaylogo = FALSE,
-        modeBarButtonsToRemove = c("select2d", "lasso2d", "autoScale2d"),
-        toImageButtonOptions = list(
-          format = "png",
-          filename = "pca_plot",
-          height = 800,
-          width = 1000
-        )
+        displayModeBar = FALSE
       )
     
     p
