@@ -18,7 +18,8 @@ required_packages <- c(
   "matrixStats",
   "shinyjqui",
   "viridisLite",
-  "webshot2"
+  "webshot2",
+  "colourpicker"
 )
 
 # Install missing packages
@@ -379,7 +380,7 @@ editableTableServer <- function(id, data_rv, counts_rv, storage, email) {
     observeEvent(input$reset, {
       old_sample_count <- nrow(current_data())
       current_data(data_rv$orig_meta)
-      counts_rv$counts <- data_rv$orig_counts
+      counts_rv$counts <- counts_rv$orig_counts  # Use counts_rv$orig_counts for consistency
       deleted_stack(list())
 
       # Track reset
@@ -486,7 +487,7 @@ ui <- function(request) {
     id = "main_tabs",
     header = tags$head(
       shinyjs::useShinyjs(),
-      tags$link(href = "https://fonts.googleapis.com/css2?family=Stack+Sans+Headline:wght@200..700&display=swap", rel="stylesheet", rel = "stylesheet"),
+      tags$link(href = "https://fonts.googleapis.com/css2?family=Stack+Sans+Headline:wght@200..700&display=swap", rel = "stylesheet"),
       tags$script(HTML("
         $(document).ready(function() {
           // Create save button
@@ -851,28 +852,49 @@ ui <- function(request) {
                   h4("Plot Options"),
                   
                   textInput("plot_title", "Title:", value = "PCA Score Plot"),
-                  sliderInput("plot_point_size", "Point Size:", min = 3, max = 20, value = 10, step = 1),
+                  sliderInput("plot_point_size", "Point Size:", min = 10, max = 50, value = 20, step = 1),
                   sliderInput("plot_point_opacity", "Opacity:", min = 0.1, max = 1, value = 1, step = 0.1),
-                  selectInput("plot_color_palette", "Palette:",
-                    choices = c("Set2" = "Set2", "Set1" = "Set1", "Set3" = "Set3",
-                               "Pastel1" = "Pastel1", "Pastel2" = "Pastel2", "Dark2" = "Dark2",
-                               "Accent" = "Accent", "Paired" = "Paired",
-                               "Viridis" = "Viridis", "Plasma" = "Plasma",
-                               "Inferno" = "Inferno", "Magma" = "Magma"),
-                    selected = "Set2"
+                  
+                  # 3-color gradient picker
+                  tags$label("Gradient Colors:", style = "font-weight: 500;"),
+                  tags$div(
+                    style = "display: flex; gap: 5px; margin-bottom: 10px;",
+                    tags$div(
+                      style = "flex: 1; text-align: center;",
+                      colourpicker::colourInput("gradient_color1", NULL, "#636EFA", 
+                        showColour = "background", palette = "square"),
+                      tags$small("Start", style = "color: #888; font-size: 0.7em;")
+                    ),
+                    tags$div(
+                      style = "flex: 1; text-align: center;",
+                      colourpicker::colourInput("gradient_color2", NULL, "#EF553B", 
+                        showColour = "background", palette = "square"),
+                      tags$small("Mid", style = "color: #888; font-size: 0.7em;")
+                    ),
+                    tags$div(
+                      style = "flex: 1; text-align: center;",
+                      colourpicker::colourInput("gradient_color3", NULL, "#00CC96", 
+                        showColour = "background", palette = "square"),
+                      tags$small("End", style = "color: #888; font-size: 0.7em;")
+                    )
                   ),
-                  checkboxInput("plot_show_grid", "Show Grid", value = FALSE),
+                  
+                  checkboxInput("plot_show_grid", "Show Grid", value = TRUE),
                   checkboxInput("plot_show_legend", "Show Legend", value = TRUE),
                   selectInput("plot_bg_color", "Background:",
                     choices = c("Light Gray" = "#f8f9fa", "White" = "white",
                                "Light Blue" = "#f0f8ff", "Light Yellow" = "#fffef0",
                                "Light Green" = "#f0fff0"),
-                    selected = "#f8f9fa"
+                    selected = "#fffef0"
                   ),
                   hr(),
-                  actionButton("open_download_modal", "Download", icon = icon("download"),
+                  actionButton("open_download_modal", "Download Plot", icon = icon("download"),
                              class = "btn-success w-100 btn-sm"),
-                  actionButton("reset_plot_options", "Reset", icon = icon("undo"),
+                  downloadButton("download_eigenvalues", "Export Eigenvalues", 
+                             class = "btn-outline-info w-100 btn-sm", style = "margin-top: 5px;"),
+                  downloadButton("download_pca_scores", "Export PCA Scores", 
+                             class = "btn-outline-info w-100 btn-sm", style = "margin-top: 5px;"),
+                  actionButton("reset_plot_options", "Reset Options", icon = icon("undo"),
                              class = "btn-secondary w-100 btn-sm", style = "margin-top: 5px;")
                 ),
                 
@@ -999,13 +1021,10 @@ server <- function(input, output, session) {
         {
           progress$set(value = 0.1, detail = "Preparing data...")
           
-          # Get current metadata (including any edits)
-          current_meta <- data_rv$meta
-          if (!is.null(meta_out$data)) {
-            current_data_func <- meta_out$data()
-            if (!is.null(current_data_func)) {
-              current_meta <- current_data_func
-            }
+          # Get current metadata (including any edits) using helper
+          current_meta <- get_current_metadata()
+          if (is.null(current_meta)) {
+            current_meta <- data_rv$meta
           }
           
           progress$set(value = 0.2, detail = "Collecting metadata and counts...")
@@ -1042,7 +1061,9 @@ server <- function(input, output, session) {
                 title = input$plot_title,
                 point_size = input$plot_point_size,
                 point_opacity = input$plot_point_opacity,
-                color_palette = input$plot_color_palette,
+                gradient_color1 = input$gradient_color1,
+                gradient_color2 = input$gradient_color2,
+                gradient_color3 = input$gradient_color3,
                 show_grid = input$plot_show_grid,
                 show_legend = input$plot_show_legend,
                 bg_color = input$plot_bg_color
@@ -1224,15 +1245,8 @@ server <- function(input, output, session) {
       min_changes_for_email = 1
     ),
     get_summary_func = reactive({
-      req(data_rv$meta)
-
-      current_meta <- data_rv$meta
-      if (!is.null(meta_out) && !is.null(meta_out$data)) {
-        current_data <- meta_out$data()
-        if (!is.null(current_data)) {
-          current_meta <- current_data
-        }
-      }
+      # Use helper function to get current metadata
+      current_meta <- get_current_metadata()
 
       if (!is.null(current_meta) && nrow(current_meta) > 0) {
         groups <- if ("group" %in% colnames(current_meta)) {
@@ -1307,12 +1321,18 @@ server <- function(input, output, session) {
           if (!is.null(session_data$current_edits$pca_result$plot_settings)) {
             plot_settings <- session_data$current_edits$pca_result$plot_settings
             updateTextInput(session, "plot_title", value = plot_settings$title %||% "PCA Score Plot")
-            updateSliderInput(session, "plot_point_size", value = plot_settings$point_size %||% 10)
+            updateSliderInput(session, "plot_point_size", value = plot_settings$point_size %||% 20)
             updateSliderInput(session, "plot_point_opacity", value = plot_settings$point_opacity %||% 1)
-            updateSelectInput(session, "plot_color_palette", selected = plot_settings$color_palette %||% "Set2")
-            updateCheckboxInput(session, "plot_show_grid", value = plot_settings$show_grid %||% FALSE)
+            # Backward compatible: check new names first, then fall back to old names
+            colourpicker::updateColourInput(session, "gradient_color1", 
+              value = plot_settings$gradient_color1 %||% plot_settings$custom_color1 %||% "#636EFA")
+            colourpicker::updateColourInput(session, "gradient_color2", 
+              value = plot_settings$gradient_color2 %||% plot_settings$custom_color2 %||% "#EF553B")
+            colourpicker::updateColourInput(session, "gradient_color3", 
+              value = plot_settings$gradient_color3 %||% plot_settings$custom_color3 %||% "#00CC96")
+            updateCheckboxInput(session, "plot_show_grid", value = plot_settings$show_grid %||% TRUE)
             updateCheckboxInput(session, "plot_show_legend", value = plot_settings$show_legend %||% TRUE)
-            updateSelectInput(session, "plot_bg_color", selected = plot_settings$bg_color %||% "#f8f9fa")
+            updateSelectInput(session, "plot_bg_color", selected = plot_settings$bg_color %||% "#fffef0")
           }
           
           showNotification(
@@ -1355,15 +1375,78 @@ server <- function(input, output, session) {
   })
 
   # Start new session
-  observeEvent(input$start_new, {
-    # Use storage module to create new session
+ observeEvent(input$start_new, {
+    # Show confirmation modal first
+    showModal(modalDialog(
+      title = "Start New Session?",
+      p("This will reset the entire application and clear all current data, including:"),
+      tags$ul(
+        tags$li("Uploaded metadata and counts"),
+        tags$li("All edits and changes"),
+        tags$li("PCA analysis results"),
+        tags$li("Current session ID")
+      ),
+      p(strong("This action cannot be undone."), style = "color: #dc3545;"),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_new_session", "Yes, Start Fresh", class = "btn-danger")
+      ),
+      size = "m"
+    ))
+  })
+  
+  # Confirmed new session - reset everything
+  observeEvent(input$confirm_new_session, {
+    removeModal()
+    
+    # Reset all data reactive values
+    data_rv$meta <- NULL
+    data_rv$orig_meta <- NULL
+    data_rv$counts <- NULL
+    data_rv$orig_counts <- NULL
+    
+    # Reset counts reactive values
+    counts_rv$counts <- NULL
+    counts_rv$orig_counts <- NULL
+    
+    # Reset PCA reactive values
+    pca_rv$pca_result <- NULL
+    pca_rv$pca_data <- NULL
+    pca_rv$computed <- FALSE
+    
+    # Reset meta_out
+    meta_out$data <- NULL
+    
+    # Reset file input
+    shinyjs::reset("file")
+    
+    # Create new session ID
     new_session_id <- storage$create_session()
-
+    
+    # Reset plot options to defaults
+    updateTextInput(session, "plot_title", value = "PCA Score Plot")
+    updateSliderInput(session, "plot_point_size", value = 20)
+    updateSliderInput(session, "plot_point_opacity", value = 1)
+    colourpicker::updateColourInput(session, "gradient_color1", value = "#636EFA")
+    colourpicker::updateColourInput(session, "gradient_color2", value = "#EF553B")
+    colourpicker::updateColourInput(session, "gradient_color3", value = "#00CC96")
+    updateCheckboxInput(session, "plot_show_grid", value = TRUE)
+    updateCheckboxInput(session, "plot_show_legend", value = TRUE)
+    updateSelectInput(session, "plot_bg_color", selected = "#fffef0")
+    
+    # Reset PCA parameters to defaults
+    updateCheckboxInput(session, "vst_blind", value = TRUE)
+    updateSelectInput(session, "vst_fitType", selected = "parametric")
+    updateNumericInput(session, "pca_ntop", value = 500)
+    updateSelectInput(session, "pca_pc_x", selected = 1)
+    updateSelectInput(session, "pca_pc_y", selected = 2)
+    
     showNotification(
-      glue::glue("Starting new session: {new_session_id}"),
-      type = "message"
+      glue::glue("New session started: {new_session_id}\nAll data has been cleared."),
+      type = "message",
+      duration = 5
     )
-
+    
     # Switch to editor tab
     shinyjs::runjs('$("a[data-value=\'editor\']").click();')
   })
@@ -1408,7 +1491,7 @@ server <- function(input, output, session) {
         meta <- meta[meta$label %in% common, ]
         cnt <- cnt %>%
           select(all_of(common)) %>%
-          mutate(across(where(is.numeric), ~ round(.x, 2)))
+          mutate(across(where(is.numeric), ~ as.integer(round(.x))))
 
         # Store data in reactive values
         data_rv$meta <- meta
@@ -1448,6 +1531,50 @@ server <- function(input, output, session) {
   })
 
   # =================================================
+  # INITIALIZE TABLE MODULES (OUTSIDE RENDERUI)
+  # =================================================
+  
+  # Initialize editable table server once at server level
+  # This returns a list with $data (reactiveVal) and $deleted_stack (reactiveVal)
+  meta_module_out <- editableTableServer(
+    "meta",
+    data_rv,
+    counts_rv,
+    storage,
+    email
+  )
+  
+  # =================================================
+  # HELPER: Get current metadata (edited version)
+  # =================================================
+  # This reactive DIRECTLY calls the module's data function
+  # It will re-run whenever the module's current_data changes
+  get_current_metadata <- reactive({
+    # Directly call the module's data reactiveVal
+    # This creates a proper reactive dependency
+    if (!is.null(meta_module_out) && !is.null(meta_module_out$data)) {
+      result <- meta_module_out$data()
+      if (!is.null(result) && is.data.frame(result) && nrow(result) > 0) {
+        return(result)
+      }
+    }
+    
+    # Fallback to data_rv$meta (original data)
+    return(data_rv$meta)
+  })
+  
+  # Keep meta_out for backward compatibility
+  observe({
+    meta_out$data <- meta_module_out$data
+  })
+  
+  # Initialize summary server - pass the reactive directly
+  summaryServer("summary", get_current_metadata)
+  
+  # Initialize linked table server - pass the reactive directly
+  linkedTableServer("counts", counts_rv, get_current_metadata)
+
+  # =================================================
   # RENDER TABLES
   # =================================================
 
@@ -1456,20 +1583,7 @@ server <- function(input, output, session) {
 
     Sys.sleep(0.5)
 
-    # Pass storage and email modules to the editable table
-    meta_module_out <- editableTableServer(
-      "meta",
-      data_rv,
-      counts_rv,
-      storage,
-      email
-    )
-
-    meta_out$data <- meta_module_out$data
-
-    summaryServer("summary", meta_out$data)
-    linkedTableServer("counts", counts_rv, meta_out$data)
-
+    # Just return the UI components - servers are already initialized above
     tagList(
       editableTableUI("meta"),
       linkedTableUI("counts", "Count Matrix (Live)")
@@ -1482,16 +1596,9 @@ server <- function(input, output, session) {
   
   # Dynamic color variable dropdown
   output$pca_color_ui <- renderUI({
-    req(data_rv$meta)
-    
-    # Get current metadata (including any edits)
-    current_meta <- data_rv$meta
-    if (!is.null(meta_out$data)) {
-      current_data <- meta_out$data()
-      if (!is.null(current_data)) {
-        current_meta <- current_data
-      }
-    }
+    # Get current metadata using helper function
+    current_meta <- get_current_metadata()
+    req(current_meta)
     
     # Get all column names from metadata
     color_choices <- colnames(current_meta)
@@ -1506,7 +1613,7 @@ server <- function(input, output, session) {
   
   # Run PCA analysis
   observeEvent(input$run_pca, {
-    req(counts_rv$counts, data_rv$meta)
+    req(counts_rv$counts)
     
     showNotification(
       "Running DESeq2 PCA with VST...",
@@ -1519,14 +1626,57 @@ server <- function(input, output, session) {
       # Get CURRENT count matrix (reflects latest edits)
       count_matrix <- as.matrix(counts_rv$counts)
       
-      # Get current metadata
-      current_meta <- data_rv$meta
-      if (!is.null(meta_out$data)) {
-        current_data <- meta_out$data()
-        if (!is.null(current_data)) {
-          current_meta <- current_data
-        }
+      # Get current metadata using helper function
+      current_meta <- get_current_metadata()
+      
+      if (is.null(current_meta) || nrow(current_meta) == 0) {
+        showNotification(
+          "Error: No metadata available. Please upload data first.",
+          type = "error",
+          duration = 5
+        )
+        return()
       }
+      
+      # CRITICAL: Validate that metadata matches count matrix
+      sample_labels_counts <- colnames(count_matrix)
+      sample_labels_meta <- current_meta$label
+      
+      # Check for mismatches
+      missing_in_meta <- setdiff(sample_labels_counts, sample_labels_meta)
+      missing_in_counts <- setdiff(sample_labels_meta, sample_labels_counts)
+      
+      if (length(missing_in_meta) > 0) {
+        showNotification(
+          paste("Warning: Samples in counts but not in metadata:", 
+                paste(missing_in_meta, collapse = ", ")),
+          type = "warning",
+          duration = 5
+        )
+      }
+      
+      if (length(missing_in_counts) > 0) {
+        # Filter metadata to only include samples that exist in count matrix
+        current_meta <- current_meta[current_meta$label %in% sample_labels_counts, , drop = FALSE]
+      }
+      
+      # Also filter count matrix to only include samples in metadata
+      common_samples <- intersect(sample_labels_counts, current_meta$label)
+      if (length(common_samples) == 0) {
+        showNotification(
+          "Error: No matching samples between metadata and count matrix!",
+          type = "error",
+          duration = 10
+        )
+        return()
+      }
+      
+      count_matrix <- count_matrix[, common_samples, drop = FALSE]
+      current_meta <- current_meta[current_meta$label %in% common_samples, , drop = FALSE]
+      
+      cat("PCA using", ncol(count_matrix), "samples\n")
+      cat("Metadata has", nrow(current_meta), "samples\n")
+      cat("Sample labels:", paste(head(colnames(count_matrix)), collapse = ", "), "...\n")
       
       # Ensure count matrix is integer (DESeq2 requirement)
       count_matrix <- round(count_matrix)
@@ -1721,14 +1871,9 @@ server <- function(input, output, session) {
     content = function(file) {
       req(pca_rv$pca_result, input$pca_color_by)
       
-      # Get current metadata
-      current_meta <- data_rv$meta
-      if (!is.null(meta_out$data)) {
-        current_data <- meta_out$data()
-        if (!is.null(current_data)) {
-          current_meta <- current_data
-        }
-      }
+      # Get current metadata using helper function
+      current_meta <- get_current_metadata()
+      req(current_meta)
       
       # Get PC indices
       pc_x <- as.integer(input$pca_pc_x)
@@ -1762,23 +1907,20 @@ server <- function(input, output, session) {
       plot_title <- if (!is.null(input$plot_title)) input$plot_title else "PCA Score Plot"
       plot_xlabel <- sprintf("PC%d (%.1f%% variance)", pc_x, var_explained[pc_x])
       plot_ylabel <- sprintf("PC%d (%.1f%% variance)", pc_y, var_explained[pc_y])
-      point_size <- if (!is.null(input$plot_point_size)) input$plot_point_size else 10
+      point_size <- if (!is.null(input$plot_point_size)) input$plot_point_size else 20
       point_opacity <- if (!is.null(input$plot_point_opacity)) input$plot_point_opacity else 1
-      color_palette <- if (!is.null(input$plot_color_palette)) input$plot_color_palette else "Set2"
-      show_grid <- if (!is.null(input$plot_show_grid)) input$plot_show_grid else FALSE
+      show_grid <- if (!is.null(input$plot_show_grid)) input$plot_show_grid else TRUE
       show_legend <- if (!is.null(input$plot_show_legend)) input$plot_show_legend else TRUE
-      bg_color <- if (!is.null(input$plot_bg_color)) input$plot_bg_color else "#f8f9fa"
+      bg_color <- if (!is.null(input$plot_bg_color)) input$plot_bg_color else "#fffef0"
       
-      # Handle color palettes
-      if (color_palette %in% c("Viridis", "Plasma", "Inferno", "Magma")) {
-        viridis_option <- switch(color_palette,
-          "Viridis" = "D", "Plasma" = "C", "Inferno" = "B", "Magma" = "A"
-        )
-        n_colors <- length(unique(color_var))
-        color_values <- viridisLite::viridis(n_colors, option = viridis_option)
-      } else {
-        color_values <- color_palette
-      }
+      # Get number of unique groups for color generation
+      n_colors <- length(unique(color_var))
+      
+      # 3-color gradient interpolation - works for any number of groups
+      c1 <- if (!is.null(input$gradient_color1)) input$gradient_color1 else "#636EFA"
+      c2 <- if (!is.null(input$gradient_color2)) input$gradient_color2 else "#EF553B"
+      c3 <- if (!is.null(input$gradient_color3)) input$gradient_color3 else "#00CC96"
+      color_values <- colorRampPalette(c(c1, c2, c3))(n_colors)
       
       # Create plot
       pc_x_col <- paste0("PC", pc_x)
@@ -1898,28 +2040,102 @@ server <- function(input, output, session) {
   # Reset plot options to defaults
   observeEvent(input$reset_plot_options, {
     updateTextInput(session, "plot_title", value = "PCA Score Plot")
-    updateSliderInput(session, "plot_point_size", value = 10)
+    updateSliderInput(session, "plot_point_size", value = 20)
     updateSliderInput(session, "plot_point_opacity", value = 1)
-    updateSelectInput(session, "plot_color_palette", selected = "Set2")
-    updateCheckboxInput(session, "plot_show_grid", value = FALSE)
+    colourpicker::updateColourInput(session, "gradient_color1", value = "#636EFA")
+    colourpicker::updateColourInput(session, "gradient_color2", value = "#EF553B")
+    colourpicker::updateColourInput(session, "gradient_color3", value = "#00CC96")
+    updateCheckboxInput(session, "plot_show_grid", value = TRUE)
     updateCheckboxInput(session, "plot_show_legend", value = TRUE)
-    updateSelectInput(session, "plot_bg_color", selected = "#f8f9fa")
+    updateSelectInput(session, "plot_bg_color", selected = "#fffef0")
     
     showNotification("Plot options reset to defaults", type = "message", duration = 2)
   })
+  
+  # =================================================
+  # PCA DATA EXPORT HANDLERS
+  # =================================================
+  
+  # Download eigenvalues/variance explained
+  output$download_eigenvalues <- downloadHandler(
+    filename = function() {
+      paste0("pca_eigenvalues_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      req(pca_rv$pca_result)
+      
+      # Get PCA object
+      pca_obj <- pca_rv$pca_result$pca
+      var_explained <- pca_rv$pca_result$var_explained
+      
+      # Create comprehensive eigenvalue table
+      eigenvalue_data <- data.frame(
+        PC = paste0("PC", seq_along(pca_obj$sdev)),
+        Eigenvalue = pca_obj$sdev^2,
+        Standard_Deviation = pca_obj$sdev,
+        Variance_Percent = round(var_explained, 4),
+        Cumulative_Variance_Percent = round(cumsum(var_explained), 4)
+      )
+      
+      write.csv(eigenvalue_data, file, row.names = FALSE)
+      
+      showNotification(
+        paste("Exported", nrow(eigenvalue_data), "principal components"),
+        type = "message",
+        duration = 3
+      )
+    }
+  )
+  
+  # Download PCA scores joined with metadata
+  output$download_pca_scores <- downloadHandler(
+    filename = function() {
+      paste0("pca_scores_with_metadata_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      req(pca_rv$pca_result, pca_rv$pca_data)
+      
+      # Get current metadata using helper function
+      current_meta <- get_current_metadata()
+      req(current_meta)
+      
+      # Get PCA scores
+      pca_scores <- pca_rv$pca_data
+      pca_scores$sample <- rownames(pca_scores)
+      
+      # Join PCA scores with metadata
+      # Metadata label column matches PCA sample rownames
+      export_data <- merge(
+        current_meta,
+        pca_scores,
+        by.x = "label",
+        by.y = "sample",
+        all.x = FALSE,  # Only keep samples that have PCA scores
+        all.y = TRUE    # Keep all PCA samples
+      )
+      
+      # Reorder columns: metadata first, then PC columns
+      pc_cols <- grep("^PC[0-9]+$", colnames(export_data), value = TRUE)
+      meta_cols <- setdiff(colnames(export_data), pc_cols)
+      export_data <- export_data[, c(meta_cols, pc_cols)]
+      
+      write.csv(export_data, file, row.names = FALSE)
+      
+      showNotification(
+        paste("Exported", nrow(export_data), "samples with", length(pc_cols), "PCs and metadata"),
+        type = "message",
+        duration = 3
+      )
+    }
+  )
   
   # PCA Score Plot
   output$pca_plot <- renderPlotly({
     req(pca_rv$pca_result, input$pca_color_by)
     
-    # Get current metadata
-    current_meta <- data_rv$meta
-    if (!is.null(meta_out$data)) {
-      current_data <- meta_out$data()
-      if (!is.null(current_data)) {
-        current_meta <- current_data
-      }
-    }
+    # Get current metadata using helper function
+    current_meta <- get_current_metadata()
+    req(current_meta)
     
     # Get PC indices
     pc_x <- as.integer(input$pca_pc_x)
@@ -1965,29 +2181,20 @@ server <- function(input, output, session) {
     # Always show variance percentage on axes
     plot_xlabel <- sprintf("PC%d (%.1f%% variance)", pc_x, var_explained[pc_x])
     plot_ylabel <- sprintf("PC%d (%.1f%% variance)", pc_y, var_explained[pc_y])
-    point_size <- if (!is.null(input$plot_point_size)) input$plot_point_size else 10
+    point_size <- if (!is.null(input$plot_point_size)) input$plot_point_size else 20
     point_opacity <- if (!is.null(input$plot_point_opacity)) input$plot_point_opacity else 1
-    color_palette <- if (!is.null(input$plot_color_palette)) input$plot_color_palette else "Set2"
-    show_grid <- if (!is.null(input$plot_show_grid)) input$plot_show_grid else FALSE
+    show_grid <- if (!is.null(input$plot_show_grid)) input$plot_show_grid else TRUE
     show_legend <- if (!is.null(input$plot_show_legend)) input$plot_show_legend else TRUE
-    bg_color <- if (!is.null(input$plot_bg_color)) input$plot_bg_color else "#f8f9fa"
+    bg_color <- if (!is.null(input$plot_bg_color)) input$plot_bg_color else "#fffef0"
     
-    # Handle color palettes - viridis scales need special treatment
-    if (color_palette %in% c("Viridis", "Plasma", "Inferno", "Magma")) {
-      # Use viridis color scales
-      viridis_option <- switch(color_palette,
-        "Viridis" = "D",
-        "Plasma" = "C",
-        "Inferno" = "B",
-        "Magma" = "A"
-      )
-      # Get number of unique groups
-      n_colors <- length(unique(color_var))
-      color_values <- viridisLite::viridis(n_colors, option = viridis_option)
-    } else {
-      # Use RColorBrewer palettes
-      color_values <- color_palette
-    }
+    # Get number of unique groups for color generation
+    n_colors <- length(unique(color_var))
+    
+    # 3-color gradient interpolation - works for any number of groups
+    c1 <- if (!is.null(input$gradient_color1)) input$gradient_color1 else "#636EFA"
+    c2 <- if (!is.null(input$gradient_color2)) input$gradient_color2 else "#EF553B"
+    c3 <- if (!is.null(input$gradient_color3)) input$gradient_color3 else "#00CC96"
+    color_values <- colorRampPalette(c(c1, c2, c3))(n_colors)
     
     # Create plot
     pc_x_col <- paste0("PC", pc_x)
