@@ -1,0 +1,56 @@
+variable_name	type	location	scope	fields_or_returns	description	used_by
+data_rv	reactiveValues	app.R server	Global	meta, orig_meta, counts, orig_counts	Main data store for uploaded/loaded metadata and count data. orig_* fields store original data for reset functionality.	editableTableServer, PCA analysis, file upload, session load, global save
+data_rv$meta	reactiveValues field	app.R server	Global	data.frame	Current working metadata (may be edited). Contains label, group, and other sample columns.	UI rendering, PCA color options, email summary
+data_rv$orig_meta	reactiveValues field	app.R server	Global	data.frame	Original unmodified metadata from file upload. Used for reset functionality.	Reset button handler
+data_rv$counts	reactiveValues field	app.R server	Global	data.frame	Current working count matrix. Syncs with counts_rv on initialization.	Initial sync to counts_rv
+data_rv$orig_counts	reactiveValues field	app.R server	Global	data.frame	Original unmodified count matrix from file upload.	Reset functionality
+counts_rv	reactiveValues	app.R server	Global	counts, orig_counts	Working count matrix store. Separate from data_rv to allow independent updates when samples are deleted/restored.	editableTableServer, linkedTableServer, PCA analysis, global save
+counts_rv$counts	reactiveValues field	app.R server	Global	data.frame	Current count matrix with columns matching metadata labels. Updated when samples deleted/renamed.	Linked table display, PCA computation
+counts_rv$orig_counts	reactiveValues field	app.R server	Global	data.frame	Original count matrix for undo/reset operations.	Undo delete, reset functionality
+pca_rv	reactiveValues	app.R server	Global	pca_result, pca_data, computed	Stores all PCA analysis results and state.	PCA plots, PCA summary, session save/load, download handler
+pca_rv$pca_result	reactiveValues field	app.R server	Global	list	Full PCA result containing: pca (prcomp object), vst (VST result), dds (DESeqDataSet), var_explained, ntop, params_used	PCA score plot, scree plot, summary, session save
+pca_rv$pca_data	reactiveValues field	app.R server	Global	data.frame	PCA coordinates (PC1, PC2, ...) for all samples. Rownames are sample labels.	PCA score plot rendering
+pca_rv$computed	reactiveValues field	app.R server	Global	logical	Flag indicating whether PCA has been computed. Controls conditional panel visibility.	output$pca_computed
+meta_out	reactiveValues	app.R server	Global	data	Container for edited metadata from editableTableServer. data field holds a reactive function.	summaryServer, linkedTableServer, PCA analysis, email summary
+meta_out$data	reactiveValues field	app.R server	Global	reactive function	Points to current_data() from editableTableServer. Call as meta_out$data() to get current data.frame.	Multiple observers and render functions
+current_data	reactiveVal	editableTableServer	Module	data.frame	Current state of editable metadata table. Updated on edits, deletes, undo, reset.	Table rendering, edit modal, delete handler, download
+deleted_stack	reactiveVal	editableTableServer	Module	list of lists	Stack of deleted rows for undo functionality. Each item has row (data) and label.	Undo button visibility, undo handler
+dynamic_data	reactive	linkedTableServer	Module	data.frame	Filtered count matrix showing only columns matching current metadata labels.	Linked table rendering and download
+storage	module return	sessionStorageServer	Global	session_id(), file_data(), current_edits(), create_session(), load_session(), save_initial_data(), update_edits(), force_save()	Session management module. Handles save/load of session data to .rds files.	Session load/create buttons, file upload, global save button
+storage$session_id	reactive accessor	sessionStorageServer	Module	character	Current session ID string (e.g., session_20251217_143022_1234).	Session status UI, email summary, global save
+storage$file_data	reactive accessor	sessionStorageServer	Module	list	Original file data (metadata + counts) as uploaded. Keys: metadata, counts.	Session save/load
+storage$current_edits	reactive accessor	sessionStorageServer	Module	list	Current edited state of data. Updated via update_edits().	Session save
+email	module return	emailNotificationsServer	Global	notifications_enabled(), user_email(), track_change()	Email notification module. Tracks changes and sends batched email summaries.	editableTableServer (change tracking), file upload, session load, PCA run
+email$notifications_enabled	reactive accessor	emailNotificationsServer	Module	logical	Whether user has enabled email notifications.	Batch timer observer, UI status display
+email$user_email	reactive accessor	emailNotificationsServer	Module	character	User's email address for notifications.	Email sending, UI status display
+rv (storage module)	reactiveValues	module_session_storage.R	Module	session_id, file_data, current_edits, file_name, file_timestamp, last_save, auto_save_timer	Internal state for session storage module.	Session status UI, file status UI, all storage functions
+rv$session_id	reactiveValues field	module_session_storage.R	Module	character	Current session identifier.	UI display, save/load functions
+rv$file_data	reactiveValues field	module_session_storage.R	Module	list	Original uploaded file data.	Save function
+rv$current_edits	reactiveValues field	module_session_storage.R	Module	list	Current edited state.	Save function
+rv$file_name	reactiveValues field	module_session_storage.R	Module	character	Name of uploaded file.	File status UI
+rv$file_timestamp	reactiveValues field	module_session_storage.R	Module	POSIXct	Timestamp of file upload.	File status UI
+rv$last_save	reactiveValues field	module_session_storage.R	Module	POSIXct	Timestamp of last successful save.	File status UI
+rv$auto_save_timer	reactiveValues field	module_session_storage.R	Module	POSIXct	Timer for debounced auto-save (currently disabled).	Debounce logic
+rv (email module)	reactiveValues	module_email_notifications.R	Module	notifications_enabled, user_email, changes, pending_changes, batch_timer, is_batching, last_sent	Internal state for email notification module.	Notification UI, batch observer, send function
+rv$notifications_enabled	reactiveValues field	module_email_notifications.R	Module	logical	Whether notifications are active.	track_change(), batch observer
+rv$user_email	reactiveValues field	module_email_notifications.R	Module	character	Recipient email address.	send_batched_changes()
+rv$changes	reactiveValues field	module_email_notifications.R	Module	list	Full change history (limited to last 50).	Reference/debugging
+rv$pending_changes	reactiveValues field	module_email_notifications.R	Module	list	Changes waiting to be sent in next batch.	Batch send function, batch status UI
+rv$batch_timer	reactiveValues field	module_email_notifications.R	Module	POSIXct	Start time of current batch window.	Batch timing logic
+rv$is_batching	reactiveValues field	module_email_notifications.R	Module	logical	Whether currently collecting changes for a batch.	track_change(), batch observer
+rv$last_sent	reactiveValues field	module_email_notifications.R	Module	POSIXct	Timestamp of last sent email.	Reference
+output$file_uploaded	reactive output	app.R server	Global	logical	Flag for conditionalPanel - TRUE when data is loaded.	Sidebar conditional panel
+output$pca_computed	reactive output	app.R server	Global	logical	Flag for conditionalPanel - TRUE when PCA is complete.	PCA results conditional panel
+output$pca_color_ui	renderUI	app.R server	Global	selectInput	Dynamic dropdown for PCA color variable based on metadata columns.	PCA sidebar
+output$tables_ui	renderUI	app.R server	Global	tagList	Renders editable table and linked table UI components.	Main editor panel
+output$session_status	renderUI	module_session_storage.R	Module	tagList	Displays current session ID with copy button.	Storage sidebar section
+output$file_status	renderUI	module_session_storage.R	Module	div	Displays loaded filename and timestamps.	Storage sidebar section
+output$notification_status	renderUI	module_email_notifications.R	Module	div	Shows enabled email and batch delay info.	Email sidebar section
+output$batch_status	renderUI	module_email_notifications.R	Module	div	Shows pending changes count and time until send.	Email sidebar section
+output$table (meta)	renderReactable	editableTableServer	Module	reactable	Renders the editable metadata table.	Main editor panel
+output$table (counts)	renderReactable	linkedTableServer	Module	reactable	Renders the linked count matrix table.	Main editor panel
+output$summary_text	renderUI	summaryServer	Module	tagList	Displays sample count and group distribution.	Editor sidebar
+output$pca_plot	renderPlotly	app.R server	Global	plotly	Interactive PCA score plot.	PCA tab
+output$pca_scree	renderPlotly	app.R server	Global	plotly	Scree plot showing variance explained.	PCA tab
+output$pca_summary	renderPrint	app.R server	Global	text	Text summary of PCA parameters and results.	PCA tab
+get_summary_func	reactive (parameter)	emailNotificationsServer	Module	list	Passed to email module - returns current data summary for email body.	send_batched_changes()
