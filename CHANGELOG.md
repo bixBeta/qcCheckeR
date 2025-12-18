@@ -74,6 +74,37 @@ When starting a new conversation, mention: **"QC-CheckeR project"** to help Clau
    - **Cleaner UI**: No radio buttons or conditional panels - just three labeled color pickers (Start, Mid, End)
    - Session save/restore backward compatible with old sessions
 
+10. **Redesigned Count Distribution Plots (SARTools-style)**
+    - **Changed from Plotly to static ggplot2** for much faster rendering with many samples
+    - **Box plots colored by GROUP** (not by sample) - matches SARTools QC style
+    - **Tabs renamed**: "Raw Counts", "VST Counts", "Comparison (Raw vs VST)", "Count Table"
+    - **Dynamic color palette**: 12 base colors that scale to any number of groups:
+      - Uses direct colors for ≤12 groups
+      - Uses `colorRampPalette()` interpolation for >12 groups
+      - Base palette: Light blue, Orange, Teal, Pink, Lime, Yellow, Tan, Gray, Periwinkle, Red, Blue, Green
+    - **Lighter background**: Custom `theme_qc()` with `#fafafa` panel background (vs darker gray)
+    - **Comparison tab**: Side-by-side faceted view of Raw vs VST (like SARTools countsBoxplots.png)
+    - **Samples ordered by group** then alphabetically for easy visual comparison
+    - **Features**:
+      - Box plots with outliers (small, semi-transparent)
+      - Legend at bottom showing group colors
+      - Clean theme_bw() base with custom styling
+      - Rotated x-axis labels for readability
+    - **Performance**: Static plots render instantly vs slow Plotly with 20+ samples
+    - **Dependencies added**: tidyr, tibble (for data reshaping)
+
+11. **Comprehensive Help Tab Overhaul**
+    - **Session ID Warning Card**: Prominent yellow warning card at top reminding users to save their Session ID before closing
+    - **About Section**: Overview of what QC-CheckeR does
+    - **Quick Start Guide**: Numbered step-by-step instructions for new users
+    - **Data Requirements**: Clear specification of required `.RData` contents (counts matrix, metadata with label/group columns)
+    - **Features Overview**: 4-column grid layout covering:
+      - Metadata Editing capabilities
+      - Visualization features
+      - PCA Analysis options
+      - Session Management (with **bolded** "Use your Session ID to resume work later")
+    - **Tips Section**: Best practices for outlier detection, batch effects, large datasets, and sample removal
+
 ---
 
 ## [v1.0.0] - 2025-12-10 (Approximate)
