@@ -76,6 +76,10 @@ When starting a new conversation, mention: **"QC-CheckeR project"** to help Clau
 
 10. **Redesigned Count Distribution Plots (SARTools-style)**
     - **Changed from Plotly to static ggplot2** for much faster rendering with many samples
+    - **Violin plots with box plot overlay** - shows distribution shape + summary statistics
+      - Violin: `trim = FALSE`, `scale = "width"`, `alpha = 0.7`
+      - Box: `width = 0.15`, white fill, shows median/IQR/whiskers
+      - No individual points plotted (keeps rendering fast with 10k+ genes)
     - **Box plots colored by GROUP** (not by sample) - matches SARTools QC style
     - **Tabs renamed**: "Raw Counts", "VST Counts", "Comparison (Raw vs VST)", "Count Table"
     - **Dynamic color palette**: 12 base colors that scale to any number of groups:
@@ -85,11 +89,6 @@ When starting a new conversation, mention: **"QC-CheckeR project"** to help Clau
     - **Lighter background**: Custom `theme_qc()` with `#fafafa` panel background (vs darker gray)
     - **Comparison tab**: Side-by-side faceted view of Raw vs VST (like SARTools countsBoxplots.png)
     - **Samples ordered by group** then alphabetically for easy visual comparison
-    - **Features**:
-      - Box plots with outliers (small, semi-transparent)
-      - Legend at bottom showing group colors
-      - Clean theme_bw() base with custom styling
-      - Rotated x-axis labels for readability
     - **Performance**: Static plots render instantly vs slow Plotly with 20+ samples
     - **Dependencies added**: tidyr, tibble (for data reshaping)
 
