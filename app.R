@@ -954,6 +954,19 @@ ui <- function(request) {
               icon = icon("plus"),
               class = "btn-success",
               width = "250px"
+            ),
+            hr(),
+            p(
+              tags$strong("New to QC-CheckeR?"),
+              tags$br(),
+              "Try the app with our example RNA-Seq dataset (20 samples, 4 groups)."
+            ),
+            actionButton(
+              "load_example",
+              "Load Example Data",
+              icon = icon("flask"),
+              class = "btn-outline-primary",
+              width = "250px"
             )
           )
         ),
@@ -1247,7 +1260,7 @@ ui <- function(request) {
             "run_pca",
             "Run PCA",
             icon = icon("play"),
-            class = "btn-primary btn-lg w-100"
+            class = "btn-outline-primary btn-lg w-100"
           )
         ),
         
@@ -1305,9 +1318,9 @@ ui <- function(request) {
                   actionButton("open_download_modal", "Download Plot", icon = icon("download"),
                              class = "btn-success w-100 btn-sm"),
                   downloadButton("download_eigenvalues", "Export Eigenvalues", 
-                             class = "btn-outline-info w-100 btn-sm", style = "margin-top: 5px;"),
+                             class = "btn-outline-primary w-100 btn-sm", style = "margin-top: 5px;"),
                   downloadButton("download_pca_scores", "Export PCA Scores", 
-                             class = "btn-outline-info w-100 btn-sm", style = "margin-top: 5px;"),
+                             class = "btn-outline-primary w-100 btn-sm", style = "margin-top: 5px;"),
                   actionButton("reset_plot_options", "Reset Options", icon = icon("undo"),
                              class = "btn-secondary w-100 btn-sm", style = "margin-top: 5px;")
                 ),
@@ -1864,6 +1877,110 @@ server <- function(input, output, session) {
     # Switch to editor tab
     shinyjs::runjs('$("a[data-value=\'editor\']").click();')
   })
+  
+  # =================================================
+  # LOAD EXAMPLE DATA
+  # =================================================
+  observeEvent(input$load_example, {
+    # Path to example data file (server-side) - RData format
+    example_file <- "Example_Data.RData"
+    
+    # Check if file exists
+    if (!file.exists(example_file)) {
+      showNotification(
+        "Example data file not found. Please contact administrator.",
+        type = "error",
+        duration = 5
+      )
+      return()
+    }
+    
+    showNotification(
+      "Loading example data...",
+      type = "message",
+      duration = NULL,
+      id = "loading_example"
+    )
+    
+    tryCatch({
+      # Load RData file into environment
+      env <- new.env()
+      load(example_file, envir = env)
+      
+      # Check for required objects
+      if (!all(c("metadata", "counts") %in% ls(env))) {
+        showNotification("Example data is corrupted (missing metadata/counts)", type = "error")
+        removeNotification("loading_example")
+        return()
+      }
+      
+      # Extract metadata and counts
+      meta <- as.data.frame(env$metadata)
+      meta$group <- as.character(meta$group)
+      cnt <- as.data.frame(env$counts)
+      
+      # Validate data
+      if (!all(c("label", "group") %in% colnames(meta))) {
+        showNotification("Example data is corrupted (missing label/group)", type = "error")
+        removeNotification("loading_example")
+        return()
+      }
+      
+      common <- intersect(meta$label, colnames(cnt))
+      if (length(common) == 0) {
+        showNotification("Example data is corrupted (no matching labels)", type = "error")
+        removeNotification("loading_example")
+        return()
+      }
+      
+      meta <- meta[meta$label %in% common, ]
+      cnt <- cnt %>%
+        select(all_of(common)) %>%
+        mutate(across(where(is.numeric), ~ as.integer(round(.x))))
+      
+      # Store data in reactive values
+      data_rv$meta <- meta
+      data_rv$orig_meta <- meta
+      data_rv$counts <- cnt
+      data_rv$orig_counts <- cnt
+      
+      # Reset PCA
+      pca_rv$pca_result <- NULL
+      pca_rv$pca_data <- NULL
+      pca_rv$computed <- FALSE
+      
+      # Use storage module to save initial data
+      file_data <- list(
+        metadata = meta,
+        counts = cnt
+      )
+      storage$save_initial_data(file_data, "Example_Data.RData")
+      
+      # Track example data load
+      email$track_change(
+        type = "Example Data Loaded",
+        details = glue::glue("Loaded example dataset with {nrow(meta)} samples, {nrow(cnt)} genes")
+      )
+      
+      removeNotification("loading_example")
+      showNotification(
+        glue::glue("Example data loaded successfully!\n{nrow(meta)} samples, {nrow(cnt)} genes, {length(unique(meta$group))} groups"),
+        type = "message",
+        duration = 5
+      )
+      
+      # Switch to editor tab
+      shinyjs::runjs('$("a[data-value=\'editor\']").click();')
+      
+    }, error = function(e) {
+      removeNotification("loading_example")
+      showNotification(
+        paste("Error loading example data:", e$message),
+        type = "error",
+        duration = 5
+      )
+    })
+  })
 
   # =================================================
   # FILE UPLOAD
@@ -2362,7 +2479,14 @@ server <- function(input, output, session) {
         height = input$plot_download_height %||% 800
       ) %>%
         layout(
-          title = plot_title,
+          title = list(
+            text = plot_title,
+            y = 0.98,
+            x = 0.5,
+            xanchor = "center",
+            yanchor = "top",
+            font = list(size = 18)
+          ),
           xaxis = list(
             title = plot_xlabel,
             zeroline = TRUE,
@@ -2376,7 +2500,14 @@ server <- function(input, output, session) {
           hovermode = "closest",
           plot_bgcolor = bg_color,
           paper_bgcolor = "white",
-          showlegend = show_legend
+          showlegend = show_legend,
+          margin = list(
+            t = 100,
+            b = 80,
+            l = 80,
+            r = 60,
+            pad = 10
+          )
         )
       
       # Get download dimensions and format
@@ -2634,7 +2765,14 @@ server <- function(input, output, session) {
       hoverinfo = "text"
     ) %>%
       layout(
-        title = plot_title,
+        title = list(
+          text = plot_title,
+          y = 0.98,
+          x = 0.5,
+          xanchor = "center",
+          yanchor = "top",
+          font = list(size = 16)
+        ),
         xaxis = list(
           title = plot_xlabel,
           zeroline = TRUE,
@@ -2649,7 +2787,14 @@ server <- function(input, output, session) {
         plot_bgcolor = bg_color,
         paper_bgcolor = "white",
         showlegend = show_legend,
-        autosize = TRUE
+        autosize = TRUE,
+        margin = list(
+          t = 80,
+          b = 60,
+          l = 60,
+          r = 40,
+          pad = 10
+        )
       ) %>%
       config(
         displayModeBar = FALSE
@@ -2692,7 +2837,14 @@ server <- function(input, output, session) {
         line = list(color = "#dc3545", width = 3)
       ) %>%
       layout(
-        title = "Variance Explained by Principal Components (DESeq2 VST)",
+        title = list(
+          text = "Variance Explained by Principal Components (DESeq2 VST)",
+          y = 0.98,
+          x = 0.5,
+          xanchor = "center",
+          yanchor = "top",
+          font = list(size = 14)
+        ),
         xaxis = list(title = "Principal Component", dtick = 1),
         yaxis = list(
           title = "Variance Explained (%)",
@@ -2707,7 +2859,14 @@ server <- function(input, output, session) {
         plot_bgcolor = "#f8f9fa",
         paper_bgcolor = "white",
         showlegend = TRUE,
-        autosize = TRUE
+        autosize = TRUE,
+        margin = list(
+          t = 60,
+          b = 50,
+          l = 60,
+          r = 60,
+          pad = 5
+        )
       ) %>%
       config(
         displayModeBar = TRUE,

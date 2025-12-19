@@ -1,56 +1,51 @@
-variable_name	type	location	scope	fields_or_returns	description	used_by
-data_rv	reactiveValues	app.R server	Global	meta, orig_meta, counts, orig_counts	Main data store for uploaded/loaded metadata and count data. orig_* fields store original data for reset functionality.	editableTableServer, PCA analysis, file upload, session load, global save
-data_rv$meta	reactiveValues field	app.R server	Global	data.frame	Current working metadata (may be edited). Contains label, group, and other sample columns.	UI rendering, PCA color options, email summary
-data_rv$orig_meta	reactiveValues field	app.R server	Global	data.frame	Original unmodified metadata from file upload. Used for reset functionality.	Reset button handler
-data_rv$counts	reactiveValues field	app.R server	Global	data.frame	Current working count matrix. Syncs with counts_rv on initialization.	Initial sync to counts_rv
-data_rv$orig_counts	reactiveValues field	app.R server	Global	data.frame	Original unmodified count matrix from file upload.	Reset functionality
-counts_rv	reactiveValues	app.R server	Global	counts, orig_counts	Working count matrix store. Separate from data_rv to allow independent updates when samples are deleted/restored.	editableTableServer, linkedTableServer, PCA analysis, global save
-counts_rv$counts	reactiveValues field	app.R server	Global	data.frame	Current count matrix with columns matching metadata labels. Updated when samples deleted/renamed.	Linked table display, PCA computation
-counts_rv$orig_counts	reactiveValues field	app.R server	Global	data.frame	Original count matrix for undo/reset operations.	Undo delete, reset functionality
-pca_rv	reactiveValues	app.R server	Global	pca_result, pca_data, computed	Stores all PCA analysis results and state.	PCA plots, PCA summary, session save/load, download handler
-pca_rv$pca_result	reactiveValues field	app.R server	Global	list	Full PCA result containing: pca (prcomp object), vst (VST result), dds (DESeqDataSet), var_explained, ntop, params_used	PCA score plot, scree plot, summary, session save
-pca_rv$pca_data	reactiveValues field	app.R server	Global	data.frame	PCA coordinates (PC1, PC2, ...) for all samples. Rownames are sample labels.	PCA score plot rendering
-pca_rv$computed	reactiveValues field	app.R server	Global	logical	Flag indicating whether PCA has been computed. Controls conditional panel visibility.	output$pca_computed
-meta_out	reactiveValues	app.R server	Global	data	Container for edited metadata from editableTableServer. data field holds a reactive function.	summaryServer, linkedTableServer, PCA analysis, email summary
-meta_out$data	reactiveValues field	app.R server	Global	reactive function	Points to current_data() from editableTableServer. Call as meta_out$data() to get current data.frame.	Multiple observers and render functions
-current_data	reactiveVal	editableTableServer	Module	data.frame	Current state of editable metadata table. Updated on edits, deletes, undo, reset.	Table rendering, edit modal, delete handler, download
-deleted_stack	reactiveVal	editableTableServer	Module	list of lists	Stack of deleted rows for undo functionality. Each item has row (data) and label.	Undo button visibility, undo handler
-dynamic_data	reactive	linkedTableServer	Module	data.frame	Filtered count matrix showing only columns matching current metadata labels.	Linked table rendering and download
-storage	module return	sessionStorageServer	Global	session_id(), file_data(), current_edits(), create_session(), load_session(), save_initial_data(), update_edits(), force_save()	Session management module. Handles save/load of session data to .rds files.	Session load/create buttons, file upload, global save button
-storage$session_id	reactive accessor	sessionStorageServer	Module	character	Current session ID string (e.g., session_20251217_143022_1234).	Session status UI, email summary, global save
-storage$file_data	reactive accessor	sessionStorageServer	Module	list	Original file data (metadata + counts) as uploaded. Keys: metadata, counts.	Session save/load
-storage$current_edits	reactive accessor	sessionStorageServer	Module	list	Current edited state of data. Updated via update_edits().	Session save
-email	module return	emailNotificationsServer	Global	notifications_enabled(), user_email(), track_change()	Email notification module. Tracks changes and sends batched email summaries.	editableTableServer (change tracking), file upload, session load, PCA run
-email$notifications_enabled	reactive accessor	emailNotificationsServer	Module	logical	Whether user has enabled email notifications.	Batch timer observer, UI status display
-email$user_email	reactive accessor	emailNotificationsServer	Module	character	User's email address for notifications.	Email sending, UI status display
-rv (storage module)	reactiveValues	module_session_storage.R	Module	session_id, file_data, current_edits, file_name, file_timestamp, last_save, auto_save_timer	Internal state for session storage module.	Session status UI, file status UI, all storage functions
-rv$session_id	reactiveValues field	module_session_storage.R	Module	character	Current session identifier.	UI display, save/load functions
-rv$file_data	reactiveValues field	module_session_storage.R	Module	list	Original uploaded file data.	Save function
-rv$current_edits	reactiveValues field	module_session_storage.R	Module	list	Current edited state.	Save function
-rv$file_name	reactiveValues field	module_session_storage.R	Module	character	Name of uploaded file.	File status UI
-rv$file_timestamp	reactiveValues field	module_session_storage.R	Module	POSIXct	Timestamp of file upload.	File status UI
-rv$last_save	reactiveValues field	module_session_storage.R	Module	POSIXct	Timestamp of last successful save.	File status UI
-rv$auto_save_timer	reactiveValues field	module_session_storage.R	Module	POSIXct	Timer for debounced auto-save (currently disabled).	Debounce logic
-rv (email module)	reactiveValues	module_email_notifications.R	Module	notifications_enabled, user_email, changes, pending_changes, batch_timer, is_batching, last_sent	Internal state for email notification module.	Notification UI, batch observer, send function
-rv$notifications_enabled	reactiveValues field	module_email_notifications.R	Module	logical	Whether notifications are active.	track_change(), batch observer
-rv$user_email	reactiveValues field	module_email_notifications.R	Module	character	Recipient email address.	send_batched_changes()
-rv$changes	reactiveValues field	module_email_notifications.R	Module	list	Full change history (limited to last 50).	Reference/debugging
-rv$pending_changes	reactiveValues field	module_email_notifications.R	Module	list	Changes waiting to be sent in next batch.	Batch send function, batch status UI
-rv$batch_timer	reactiveValues field	module_email_notifications.R	Module	POSIXct	Start time of current batch window.	Batch timing logic
-rv$is_batching	reactiveValues field	module_email_notifications.R	Module	logical	Whether currently collecting changes for a batch.	track_change(), batch observer
-rv$last_sent	reactiveValues field	module_email_notifications.R	Module	POSIXct	Timestamp of last sent email.	Reference
-output$file_uploaded	reactive output	app.R server	Global	logical	Flag for conditionalPanel - TRUE when data is loaded.	Sidebar conditional panel
-output$pca_computed	reactive output	app.R server	Global	logical	Flag for conditionalPanel - TRUE when PCA is complete.	PCA results conditional panel
-output$pca_color_ui	renderUI	app.R server	Global	selectInput	Dynamic dropdown for PCA color variable based on metadata columns.	PCA sidebar
-output$tables_ui	renderUI	app.R server	Global	tagList	Renders editable table and linked table UI components.	Main editor panel
-output$session_status	renderUI	module_session_storage.R	Module	tagList	Displays current session ID with copy button.	Storage sidebar section
-output$file_status	renderUI	module_session_storage.R	Module	div	Displays loaded filename and timestamps.	Storage sidebar section
-output$notification_status	renderUI	module_email_notifications.R	Module	div	Shows enabled email and batch delay info.	Email sidebar section
-output$batch_status	renderUI	module_email_notifications.R	Module	div	Shows pending changes count and time until send.	Email sidebar section
-output$table (meta)	renderReactable	editableTableServer	Module	reactable	Renders the editable metadata table.	Main editor panel
-output$table (counts)	renderReactable	linkedTableServer	Module	reactable	Renders the linked count matrix table.	Main editor panel
-output$summary_text	renderUI	summaryServer	Module	tagList	Displays sample count and group distribution.	Editor sidebar
-output$pca_plot	renderPlotly	app.R server	Global	plotly	Interactive PCA score plot.	PCA tab
-output$pca_scree	renderPlotly	app.R server	Global	plotly	Scree plot showing variance explained.	PCA tab
-output$pca_summary	renderPrint	app.R server	Global	text	Text summary of PCA parameters and results.	PCA tab
-get_summary_func	reactive (parameter)	emailNotificationsServer	Module	list	Passed to email module - returns current data summary for email body.	send_batched_changes()
+Name	Type	Location	Scope	Returns	Description	Used By
+data_rv	reactiveValues	app.R server	Global	list(meta, orig_meta, counts, orig_counts)	Primary data container for uploaded metadata and counts. Reset on new session or file upload.	editableTableServer, linkedTableServer, PCA analysis, session save/restore
+counts_rv	reactiveValues	app.R server	Global	list(counts, orig_counts)	Working count matrix. Synced from data_rv on upload. Columns match metadata labels.	linkedTableServer, PCA analysis, violin plots
+pca_rv	reactiveValues	app.R server	Global	list(pca_result, pca_data, computed)	Stores PCA results including VST object, scores, variance explained. Reset on new file upload.	PCA plot, scree plot, VST violin plots, eigenvalue/score exports
+meta_out	reactiveValues	app.R server	Global	list(data)	Bridge reactive to expose edited metadata from editableTableServer module.	get_current_metadata helper, summary display
+get_current_metadata	reactive	app.R server	Global	data.frame	Helper that accesses editableTableServer output. Creates proper reactive dependency for consumers.	PCA run handler, PCA plot, PCA exports, email summary, global save, violin plots
+current_data	reactiveVal	editableTableServer	Module	data.frame	Current state of editable metadata table. Updated by edits, deletes, resets.	Table render, undo, reset, download, parent scope via module return
+deleted_stack	reactiveVal	editableTableServer	Module	list	Stack of deleted rows for undo functionality. LIFO structure.	Undo handler, undo UI visibility
+dynamic_data	reactive	linkedTableServer	Module	data.frame	Count matrix filtered to match current metadata labels. Auto-updates when samples change.	Count table render, violin plots, download
+storage	moduleServer	sessionStorageServer	Module	list(session_id, load_session, save_initial_data, etc.)	Session management functions for save/restore functionality.	File upload, session restore, auto-save
+email	moduleServer	emailNotificationsServer	Module	list(notifications_enabled, track_change, etc.)	Email notification batching and sending.	All edit handlers, file upload, example data load
+sartools_base_colors	vector	linkedTableServer	Module	character[12]	Extended color palette for group coloring in violin/box plots. 12 distinct colors.	get_group_colors helper
+get_group_colors	function	linkedTableServer	Module	named character vector	Generates colors for any number of groups. Uses base colors ≤12, interpolates for >12.	All violin/box plots
+theme_qc	function	linkedTableServer	Module	ggplot theme	Custom ggplot2 theme with light background (#fafafa), clean styling.	All ggplot2 plots (violins, boxes)
+output$file_uploaded	reactive	app.R server	Global	logical	Flag for conditional panel visibility. TRUE when data_rv$meta is not NULL.	Sidebar conditional panels
+output$pca_computed	reactive	app.R server	Global	logical	Flag for PCA results visibility. TRUE when pca_rv$computed is TRUE.	PCA results panel, VST violin tabs
+output$pca_plot	renderPlotly	app.R server	Global	plotly	Interactive PCA score plot with customizable colors, size, opacity, background.	PCA Score Plot tab
+output$pca_scree	renderPlotly	app.R server	Global	plotly	Scree plot showing variance explained per PC with cumulative line.	Scree Plot tab
+output$boxplot_raw	renderPlot	linkedTableServer	Module	ggplot	Static violin+box plot of raw counts (log2+1) colored by group.	Raw Counts tab
+output$boxplot_vst	renderPlot	linkedTableServer	Module	ggplot	Static violin+box plot of VST counts colored by group. Requires PCA completion.	VST Counts tab
+output$comparison_plot	renderPlot	linkedTableServer	Module	ggplot	Side-by-side faceted comparison of raw vs VST distributions.	Comparison tab
+output$download_pca_plot	downloadHandler	app.R server	Global	PNG/SVG/PDF	Exports PCA plot with current customization options and proper margins.	Download Plot modal
+output$download_eigenvalues	downloadHandler	app.R server	Global	CSV	Exports eigenvalues, standard deviations, variance explained, cumulative variance.	Export Eigenvalues button
+output$download_pca_scores	downloadHandler	app.R server	Global	CSV	Exports PCA scores (all PCs) joined with current metadata.	Export PCA Scores button
+input$load_session	actionButton	app.R UI	Global	trigger	Loads existing session by ID from session_id_input.	Session restore handler
+input$start_new	actionButton	app.R UI	Global	trigger	Opens confirmation modal for new session.	New session modal
+input$confirm_new_session	actionButton	app.R UI	Modal	trigger	Confirms new session, resets all data and creates new session ID.	New session reset handler
+input$load_example	actionButton	app.R UI	Global	trigger	Loads Example_Data.RData from server, creates new session.	Example data load handler
+input$file	fileInput	app.R UI	Global	file info	Accepts .RData file upload containing metadata and counts.	File upload handler
+input$run_pca	actionButton	app.R UI	Global	trigger	Triggers DESeq2 VST and PCA computation with current parameters.	PCA run handler
+input$pca_pc_x	selectInput	app.R UI	Global	integer	X-axis PC selection (1-10+).	PCA plot render
+input$pca_pc_y	selectInput	app.R UI	Global	integer	Y-axis PC selection (1-10+).	PCA plot render
+input$pca_color_by	selectInput	app.R UI	Global	character	Metadata column for point coloring.	PCA plot render
+input$vst_blind	checkboxInput	app.R UI	Global	logical	Blind mode for VST (ignore sample info).	PCA/VST computation
+input$vst_fitType	selectInput	app.R UI	Global	character	Dispersion fit type (parametric/local/mean).	PCA/VST computation
+input$pca_ntop	numericInput	app.R UI	Global	integer	Number of top variable genes for PCA.	PCA computation
+input$plot_title	textInput	app.R UI	Global	character	Custom title for PCA plot.	PCA plot render, download
+input$plot_point_size	sliderInput	app.R UI	Global	numeric	Point size for PCA scatter.	PCA plot render, download
+input$plot_point_opacity	sliderInput	app.R UI	Global	numeric	Point opacity (0-1).	PCA plot render, download
+input$gradient_color1	colourInput	app.R UI	Global	hex color	Start color for group gradient (#636EFA default).	PCA plot render, download
+input$gradient_color2	colourInput	app.R UI	Global	hex color	Middle color for group gradient (#EF553B default).	PCA plot render, download
+input$gradient_color3	colourInput	app.R UI	Global	hex color	End color for group gradient (#00CC96 default).	PCA plot render, download
+input$plot_show_grid	checkboxInput	app.R UI	Global	logical	Show/hide plot grid lines.	PCA plot render, download
+input$plot_show_legend	checkboxInput	app.R UI	Global	logical	Show/hide color legend.	PCA plot render, download
+input$plot_bg_color	selectInput	app.R UI	Global	hex color	Plot background color preset.	PCA plot render, download
+input$reset_plot_options	actionButton	app.R UI	Global	trigger	Resets all plot options to defaults.	Reset handler
+input$open_download_modal	actionButton	app.R UI	Global	trigger	Opens plot download configuration modal.	Download modal handler
+input$plot_download_format	selectInput	app.R UI	Modal	character	Export format (png/svg/pdf).	Download handler
+input$plot_download_width	numericInput	app.R UI	Modal	integer	Export width in pixels.	Download handler
+input$plot_download_height	numericInput	app.R UI	Modal	integer	Export height in pixels.	Download handler
+input$plot_download_filename	textInput	app.R UI	Modal	character	Custom filename for export.	Download handler

@@ -104,6 +104,19 @@ When starting a new conversation, mention: **"QC-CheckeR project"** to help Clau
       - Session Management (with **bolded** "Use your Session ID to resume work later")
     - **Tips Section**: Best practices for outlier detection, batch effects, large datasets, and sample removal
 
+12. **Load Example Data Button**
+    - **New button on Start page**: "Load Example Data" with flask icon
+    - **One-click loading**: Loads simulated RNA-Seq dataset (20 samples, 4 groups, 10k genes)
+    - **Server-side file**: Expects `Example_Data.RData` in the app directory
+    - **Automatic navigation**: Switches to editor tab after loading
+    - **Session tracking**: Creates new session ID and saves initial data
+    - **Example data features**:
+      - 4 groups: Control, Treatment_A, Treatment_B, Treatment_C
+      - 5 samples per group
+      - ~500 differentially expressed genes per treatment
+      - Sample_15 is an outlier for QC testing
+      - Additional metadata: batch, replicate, RIN, concentration
+
 ---
 
 ## [v1.0.0] - 2025-12-10 (Approximate)
