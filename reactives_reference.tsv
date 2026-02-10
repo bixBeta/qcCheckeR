@@ -37,7 +37,7 @@ output$download_eigenvalues	downloadHandler	app.R server	Global	CSV	Exports eige
 output$download_pca_scores	downloadHandler	app.R server	Global	CSV	Exports PCA scores (all PCs) joined with current metadata.	Export PCA Scores button
 output$download_annotations	downloadHandler	app.R server	Global	CSV	Exports full annotated counts matrix with gene annotations.	Annotation download button
 output$download_top_genes	downloadHandler	app.R server	Global	CSV	Exports top loading genes with metadata, coordinates, and variance explained.	Top Genes download button
-input$annotation_method	radioButtons	app.R UI	Global	character	Annotation method: "gprofiler" or "gtf".	Annotation conditional panels, handlers
+input$annotation_method	radioButtons	app.R UI	Global	character	Annotation method: `gprofiler` or `gtf`.	Annotation conditional panels, handlers
 input$annotation_organism	selectInput	app.R UI	Global	character	Organism for g:Profiler (hsapiens, mmusculus, etc.).	g:Profiler annotation handler
 input$annotation_source	selectInput	app.R UI	Global	character	ID type for g:Profiler (ENSG, ENST, ENTREZGENE_ACC, HGNC).	g:Profiler annotation handler
 input$run_annotation	actionButton	app.R UI	Global	trigger	Triggers g:Profiler annotation with current parameters.	g:Profiler annotation handler
