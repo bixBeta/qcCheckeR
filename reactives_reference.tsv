@@ -47,7 +47,7 @@ input$run_gtf_annotation	actionButton	app.R UI	Global	trigger	Triggers GTF file 
 input$clear_annotations	actionButton	app.R UI	Global	trigger	Clears current annotation data.	Clear annotations handler
 input$topgenes_pc	selectInput	app.R UI	Global	integer	PC selection for top genes table (1-10).	top_loading_genes reactive
 input$topgenes_n	numericInput	app.R UI	Global	integer	Number of top genes to show (10-500, default 50).	top_loading_genes reactive
-input$topgenes_direction	selectInput	app.R UI	Global	character	Loading direction filter: "both", "positive", "negative".	top_loading_genes reactive
+input$topgenes_direction	selectInput	app.R UI	Global	character	Loading direction filter: `both`, `positive`, `negative`.	top_loading_genes reactive
 input$heatmap_pc	selectInput	app.R UI	Global	integer	PC selection for heatmap (1-10).	heatmap_top_genes reactive, heatmap render
 input$heatmap_n_genes	numericInput	app.R UI	Global	integer	Number of genes for heatmap (10-100, default 30).	heatmap_top_genes reactive, heatmap render
 input$heatmap_color_by	selectInput	app.R UI	Global	character	Metadata column for heatmap annotation bar.	heatmap render
