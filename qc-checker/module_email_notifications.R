@@ -91,20 +91,39 @@ emailNotificationsServer <- function(
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # Default email config with secure default path
+    # Default email config with local .credentials folder
+    # This works better in Docker and keeps credentials with the app
     if (is.null(email_config)) {
       email_config <- list(
         enabled = TRUE,
         sender_email = "your.app.notifications@gmail.com",
-        creds_file = path.expand("~/.shiny_app_credentials/gmail_creds"),
+        creds_file = ".credentials/gmail_creds",  # Local to app directory
         batch_delay_seconds = 120,
         min_changes_for_email = 1
       )
-    } else {
-      # Expand ~ in creds_file path if present
-      if (!is.null(email_config$creds_file)) {
+    }
+    
+    # Handle creds_file path - support environment variable override
+    if (!is.null(email_config$creds_file)) {
+      # Check for environment variable override first
+      env_creds <- Sys.getenv("EMAIL_CREDS_FILE", "")
+      if (nzchar(env_creds)) {
+        email_config$creds_file <- env_creds
+      }
+      # Only expand ~ if present (don't expand relative paths)
+      if (grepl("^~", email_config$creds_file)) {
         email_config$creds_file <- path.expand(email_config$creds_file)
       }
+    }
+    
+    # Log email configuration at startup
+    cat("EMAIL MODULE: Initialized\n")
+    cat("  Credentials path:", email_config$creds_file, "\n")
+    cat("  Full path:", normalizePath(email_config$creds_file, mustWork = FALSE), "\n")
+    cat("  Working directory:", getwd(), "\n")
+    cat("  Credentials exist:", file.exists(email_config$creds_file), "\n")
+    if (!file.exists(email_config$creds_file)) {
+      cat("  ⚠️  Run setup_email.R to create credentials\n")
     }
 
     # Reactive values
@@ -160,15 +179,29 @@ emailNotificationsServer <- function(
       }
 
       if (!file.exists(email_config$creds_file)) {
+        # Show detailed debug info
+        full_path <- normalizePath(email_config$creds_file, mustWork = FALSE)
         showNotification(
-          paste(
-            "Email credentials not found:",
-            email_config$creds_file,
-            "\nPlease run setup_email_credentials() first."
+          paste0(
+            "Email credentials not found!\n",
+            "Looking for: ", email_config$creds_file, "\n",
+            "Full path: ", full_path, "\n",
+            "Working dir: ", getwd(), "\n\n",
+            "Run setup_email.R to create credentials."
           ),
           type = "error",
-          duration = 10
+          duration = 15
         )
+        cat("EMAIL DEBUG: Credentials not found\n")
+        cat("  Config path:", email_config$creds_file, "\n")
+        cat("  Full path:", full_path, "\n")
+        cat("  Working dir:", getwd(), "\n")
+        cat("  File exists:", file.exists(email_config$creds_file), "\n")
+        if (dir.exists(dirname(email_config$creds_file))) {
+          cat("  Directory contents:", paste(list.files(dirname(email_config$creds_file), all.files = TRUE), collapse = ", "), "\n")
+        } else {
+          cat("  Directory does not exist:", dirname(email_config$creds_file), "\n")
+        }
         return()
       }
 
@@ -285,6 +318,8 @@ emailNotificationsServer <- function(
         return(FALSE)
       }
       if (!file.exists(email_config$creds_file)) {
+        cat("EMAIL BATCH: Credentials file not found, skipping send\n")
+        cat("  Expected:", email_config$creds_file, "\n")
         return(FALSE)
       }
       if (length(rv$pending_changes) < email_config$min_changes_for_email) {
@@ -668,7 +703,8 @@ emailNotificationsServer <- function(
 #' Set up Gmail credentials for email notifications
 #'
 #' Run this function once to create the credentials file.
-#' By default, stores in a secure location in the user's home directory.
+#' By default, stores in a .credentials folder in the current directory
+#' (works well in Docker and keeps credentials with the app).
 #'
 #' You need:
 #' 1. A Gmail account (dedicated app account recommended)
@@ -676,17 +712,20 @@ emailNotificationsServer <- function(
 #' 3. An App Password generated from Google Account settings
 #'
 #' @param creds_file Path where credentials will be saved.
-#'   Default: "~/.shiny_app_credentials/gmail_creds" (secure home directory)
+#'   Default: ".credentials/gmail_creds" (local to app directory)
 #'   Use NULL for default location.
 #'
 #' @return The path to the created credentials file (invisibly)
 #'
 #' @examples
-#' # Run once in your R console (uses secure default location):
+#' # Run once in your R console (uses local .credentials folder):
 #' setup_email_credentials()
 #'
 #' # Or specify custom file path:
-#' setup_email_credentials("path/to/gmail_creds")
+#' setup_email_credentials("/path/to/gmail_creds")
+#'
+#' # For Docker, you can also set via environment variable:
+#' # Sys.setenv(EMAIL_CREDS_FILE = "/app/.credentials/gmail_creds")
 setup_email_credentials <- function(creds_file = NULL) {
   if (!requireNamespace("blastula", quietly = TRUE)) {
     stop(
@@ -694,20 +733,29 @@ setup_email_credentials <- function(creds_file = NULL) {
     )
   }
 
-  # Use secure default location if not specified
+  # Use local .credentials folder if not specified
   if (is.null(creds_file)) {
-    secure_dir <- path.expand("~/.shiny_app_credentials")
-    if (!dir.exists(secure_dir)) {
-      dir.create(secure_dir, recursive = TRUE)
-      cat("Created secure credentials directory:", secure_dir, "\n")
+    creds_dir <- ".credentials"
+    if (!dir.exists(creds_dir)) {
+      dir.create(creds_dir, recursive = TRUE)
+      cat("Created credentials directory:", creds_dir, "\n")
     }
-    creds_file <- file.path(secure_dir, "gmail_creds")
+    creds_file <- file.path(creds_dir, "gmail_creds")
   } else {
-    creds_file <- path.expand(creds_file)
+    # Only expand ~ if present
+    if (grepl("^~", creds_file)) {
+      creds_file <- path.expand(creds_file)
+    }
+    # Create parent directory if needed
+    creds_dir <- dirname(creds_file)
+    if (!dir.exists(creds_dir) && creds_dir != ".") {
+      dir.create(creds_dir, recursive = TRUE)
+      cat("Created credentials directory:", creds_dir, "\n")
+    }
   }
 
   cat("\n=== Email Credentials Setup ===\n")
-  cat("Credentials will be saved to:", creds_file, "\n\n")
+  cat("Credentials will be saved to:", normalizePath(creds_file, mustWork = FALSE), "\n\n")
   cat("Please make sure you have:\n")
   cat("1. A Gmail account for the app\n")
   cat("2. 2-factor authentication enabled\n")
@@ -749,13 +797,13 @@ setup_email_credentials <- function(creds_file = NULL) {
   )
 
   cat("\n✅ Email credentials file created successfully!\n")
-  cat("📁 File location:", creds_file, "\n")
+  cat("📁 File location:", normalizePath(creds_file, mustWork = FALSE), "\n")
   cat("📧 Sender email:", email, "\n\n")
 
   cat("🔐 SECURITY REMINDERS:\n")
-  cat("1. This file is stored in your home directory (secure)\n")
+  cat("1. Add .credentials/ to your .gitignore file\n")
   cat("2. Do NOT commit this file to version control\n")
-  cat("3. Add to .gitignore: .shiny_app_credentials/\n\n")
+  cat("3. In Docker, mount this file or create it during setup\n\n")
 
   # Test the configuration
   test <- readline(prompt = "Send a test email? (y/n): ")
