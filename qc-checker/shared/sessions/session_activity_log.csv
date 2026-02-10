@@ -1,0 +1,7 @@
+"timestamp","email","email_hash","session_id","app_name","action","file_name","samples","has_pca","has_annotations"
+"2026-02-10 13:18:07","fahmed@cornell.edu","dbdcb03aab5d","qc_20260210131804_73780e5c","qc-checker","saved","7065D_Data.RData",6,FALSE,FALSE
+"2026-02-10 13:22:22","fahmed@cornell.edu","dbdcb03aab5d","qc_20260210131804_73780e5c","qc-checker","loaded","7065D_Data.RData",6,FALSE,FALSE
+"2026-02-10 13:24:38","fahmed@cornell.edu","dbdcb03aab5d","qc_20260210131804_73780e5c","qc-checker","loaded","7065D_Data.RData",6,FALSE,FALSE
+"2026-02-10 13:26:56","fahmed@cornell.edu","dbdcb03aab5d","qc_20260210131804_73780e5c","qc-checker","loaded","7065D_Data.RData",6,FALSE,FALSE
+"2026-02-10 13:29:48","fahmed@cornell.edu","dbdcb03aab5d","qc_20260210131804_73780e5c","qc-checker","saved","7065D_Data.RData",6,FALSE,FALSE
+"2026-02-10 13:30:05","fahmed@cornell.edu","dbdcb03aab5d","qc_20260210131804_73780e5c","qc-checker","saved","7065D_Data.RData",4,FALSE,FALSE

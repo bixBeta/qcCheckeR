@@ -1,0 +1,34 @@
+{
+  "users": {
+    "dbdcb03aab5d": {
+      "email": "fahmed@cornell.edu",
+      "created": "2026-02-10T13:17:51Z",
+      "apps": {
+        "qc-checker": [
+          {
+            "session_id": "qc_20260210131804_73780e5c",
+            "created": "2026-02-10T13:30:05Z",
+            "updated": "2026-02-10T13:30:05Z",
+            "file_name": "7065D_Data.RData",
+            "samples": 4,
+            "groups": ["DT", "Halo"],
+            "has_pca": false,
+            "has_annotations": false,
+            "status": "complete"
+          }
+        ]
+      }
+    },
+    "b6e405b2027d": {
+      "email": "fahmed@cornell.edui",
+      "created": "2026-02-10T13:24:36Z",
+      "apps": []
+    }
+  },
+  "settings": {
+    "retention_days": null,
+    "max_sessions_per_user": 50
+  },
+  "version": "1.0.0",
+  "created": "2026-02-10T13:17:51Z"
+}
