@@ -1,0 +1,40 @@
+# =============================================================================
+# QC-CheckeR .gitignore
+# =============================================================================
+
+# Email credentials (IMPORTANT - never commit these!)
+.credentials/
+gmail_creds
+*_creds
+
+# Session data (user data, should not be committed)
+sessions/
+*.rds
+
+# R-specific
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Logs
+*.log
+logs/
+
+# Shiny-specific
+rsconnect/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
