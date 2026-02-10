@@ -5,11 +5,14 @@
 # Run this script to set up email credentials for the QC-CheckeR app.
 # Works in Docker or local environments.
 #
-# Usage:
-#   Rscript setup_email.R
-#
-# Or in R console:
+# Usage (interactive - in R console):
 #   source("setup_email.R")
+#
+# Usage (non-interactive - command line):
+#   Rscript setup_email.R your.email@gmail.com
+#
+# Or with custom path:
+#   Rscript setup_email.R your.email@gmail.com /path/to/creds
 #
 # =============================================================================
 
@@ -25,11 +28,39 @@ if (!requireNamespace("blastula", quietly = TRUE)) {
   quit(status = 1)
 }
 
-# Determine credentials path
-# Priority: 1) EMAIL_CREDS_FILE env var, 2) local .credentials folder
-creds_file <- Sys.getenv("EMAIL_CREDS_FILE", "")
-if (!nzchar(creds_file)) {
-  creds_file <- ".credentials/gmail_creds"
+# Check if running interactively or via command line
+args <- commandArgs(trailingOnly = TRUE)
+is_interactive <- interactive()
+
+# Get email from args or prompt
+if (length(args) >= 1) {
+  email <- args[1]
+  cat("Email (from argument):", email, "\n")
+} else if (is_interactive) {
+  email <- readline(prompt = "Enter Gmail address: ")
+} else {
+  cat("============================================================\n")
+  cat("                    NON-INTERACTIVE MODE                    \n")
+  cat("============================================================\n\n")
+  cat("Usage: Rscript setup_email.R <email> [creds_path]\n\n")
+  cat("Examples:\n")
+  cat("  Rscript setup_email.R myapp@gmail.com\n")
+  cat("  Rscript setup_email.R myapp@gmail.com .credentials/gmail_creds\n\n")
+  cat("Or run interactively in R:\n")
+  cat("  R\n")
+  cat("  > source('setup_email.R')\n\n")
+  quit(status = 1)
+}
+
+# Get credentials path from args or use default
+if (length(args) >= 2) {
+  creds_file <- args[2]
+} else {
+  # Check for environment variable override
+  creds_file <- Sys.getenv("EMAIL_CREDS_FILE", "")
+  if (!nzchar(creds_file)) {
+    creds_file <- ".credentials/gmail_creds"
+  }
 }
 
 creds_dir <- dirname(creds_file)
@@ -49,35 +80,26 @@ if (file.exists(creds_file)) {
   cat("\n⚠️  Credentials file already exists!\n")
   cat("   ", normalizePath(creds_file), "\n\n")
   
-  overwrite <- readline(prompt = "Overwrite existing credentials? (y/n): ")
-  if (tolower(overwrite) != "y") {
-    cat("Setup cancelled. Existing credentials preserved.\n")
+  if (is_interactive) {
+    overwrite <- readline(prompt = "Overwrite existing credentials? (y/n): ")
+    if (tolower(overwrite) != "y") {
+      cat("Setup cancelled. Existing credentials preserved.\n")
+      quit(status = 0)
+    }
+  } else {
+    cat("Use --force or delete existing file to overwrite.\n")
+    cat("Existing credentials preserved.\n")
     quit(status = 0)
   }
   cat("\n")
 }
 
-cat("============================================================\n")
-cat("                    GMAIL APP PASSWORD                       \n")
-cat("============================================================\n\n")
-cat("You need a Gmail App Password (NOT your regular password).\n\n")
-cat("To generate one:\n")
-cat("1. Go to: https://myaccount.google.com/apppasswords\n")
-cat("2. Sign in to your Gmail account\n")
-cat("3. Select 'Mail' and your device\n")
-cat("4. Click 'Generate'\n")
-cat("5. Copy the 16-character password\n\n")
-cat("NOTE: You must have 2-factor authentication enabled.\n\n")
-
-# Get email
-email <- readline(prompt = "Enter Gmail address: ")
-
+# Validate email
 if (!nzchar(email)) {
   cat("ERROR: Email address is required.\n")
   quit(status = 1)
 }
 
-# Validate email format
 if (!grepl("@", email)) {
   cat("ERROR: Invalid email format.\n")
   quit(status = 1)
@@ -85,18 +107,12 @@ if (!grepl("@", email)) {
 
 if (!grepl("@gmail\\.com$", email, ignore.case = TRUE)) {
   cat("\n⚠️  Warning: This doesn't appear to be a Gmail address.\n")
-  cat("   SMTP settings are configured for Gmail.\n")
-  proceed <- readline(prompt = "Continue anyway? (y/n): ")
-  if (tolower(proceed) != "y") {
-    cat("Setup cancelled.\n")
-    quit(status = 0)
-  }
+  cat("   SMTP settings are configured for Gmail.\n\n")
 }
-
-cat("\n")
 
 # Create credentials
 cat("Creating credentials file...\n")
+cat("You will be prompted for your App Password.\n\n")
 
 tryCatch({
   blastula::create_smtp_creds_file(
@@ -138,47 +154,49 @@ tryCatch({
   quit(status = 1)
 })
 
-# Offer to test
-cat("------------------------------------------------------------\n")
-test <- readline(prompt = "Send a test email now? (y/n): ")
-
-if (tolower(test) == "y") {
-  test_to <- readline(prompt = "Send test to (email address): ")
+# Offer to test (only in interactive mode)
+if (is_interactive) {
+  cat("------------------------------------------------------------\n")
+  test <- readline(prompt = "Send a test email now? (y/n): ")
   
-  if (nzchar(test_to)) {
-    cat("\nSending test email...\n")
+  if (tolower(test) == "y") {
+    test_to <- readline(prompt = "Send test to (email address): ")
     
-    tryCatch({
-      test_email <- blastula::compose_email(
-        body = blastula::md(paste0(
-          "## ✅ Email Configuration Test\n\n",
-          "This is a test email from **QC-CheckeR**.\n\n",
-          "If you're seeing this, email notifications are working!\n\n",
-          "---\n\n",
-          "*Sent at: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), "*"
-        ))
-      )
+    if (nzchar(test_to)) {
+      cat("\nSending test email...\n")
       
-      blastula::smtp_send(
-        email = test_email,
-        from = email,
-        to = test_to,
-        subject = "QC-CheckeR Email Test",
-        credentials = blastula::creds_file(creds_file)
-      )
-      
-      cat("\n✅ Test email sent successfully!\n")
-      cat("   Check inbox of:", test_to, "\n")
-      
-    }, error = function(e) {
-      cat("\n❌ Failed to send test email:\n")
-      cat("   ", e$message, "\n\n")
-      cat("Common issues:\n")
-      cat("1. Wrong App Password (must be 16 chars, no spaces)\n")
-      cat("2. 2-factor auth not enabled on Gmail\n")
-      cat("3. 'Less secure app access' blocked (use App Password instead)\n")
-      cat("4. Network/firewall blocking SMTP port 465\n")
-    })
+      tryCatch({
+        test_email <- blastula::compose_email(
+          body = blastula::md(paste0(
+            "## ✅ Email Configuration Test\n\n",
+            "This is a test email from **QC-CheckeR**.\n\n",
+            "If you're seeing this, email notifications are working!\n\n",
+            "---\n\n",
+            "*Sent at: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), "*"
+          ))
+        )
+        
+        blastula::smtp_send(
+          email = test_email,
+          from = email,
+          to = test_to,
+          subject = "QC-CheckeR Email Test",
+          credentials = blastula::creds_file(creds_file)
+        )
+        
+        cat("\n✅ Test email sent successfully!\n")
+        cat("   Check inbox of:", test_to, "\n")
+        
+      }, error = function(e) {
+        cat("\n❌ Failed to send test email:\n")
+        cat("   ", e$message, "\n\n")
+        cat("Common issues:\n")
+        cat("1. Wrong App Password (must be 16 chars, no spaces)\n")
+        cat("2. 2-factor auth not enabled on Gmail\n")
+        cat("3. 'Less secure app access' blocked (use App Password instead)\n")
+        cat("4. Network/firewall blocking SMTP port 465\n")
+      })
+    }
   }
 }
 
