@@ -51,6 +51,9 @@ emailNotificationsUI <- function(id) {
 #'   - min_changes_for_email: Minimum changes to trigger email (default: 1)
 #' @param get_summary_func Reactive function that returns data summary for emails
 #'   Should return a list with summary information
+#' @param session_id_func Optional reactive function that returns current session/data ID.
+#'   When this value changes, pending changes are automatically cleared to prevent
+#'   mixing changes from different data contexts in email summaries.
 #'
 #' @return List of functions and reactive values:
 #'   - notifications_enabled(): Reactive value indicating if notifications are on
@@ -72,7 +75,8 @@ emailNotificationsUI <- function(id) {
 #'       info = paste("Total rows:", nrow(my_data)),
 #'       timestamp = Sys.time()
 #'     )
-#'   })
+#'   }),
+#'   session_id_func = reactive({ current_session_id })  # Auto-clear on session change
 #' )
 #'
 #' # Track a change
@@ -86,7 +90,8 @@ emailNotificationsUI <- function(id) {
 emailNotificationsServer <- function(
   id,
   email_config = NULL,
-  get_summary_func = NULL
+  get_summary_func = NULL,
+  session_id_func = NULL # NEW: Optional reactive that returns current session ID
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -97,12 +102,12 @@ emailNotificationsServer <- function(
       email_config <- list(
         enabled = TRUE,
         sender_email = "your.app.notifications@gmail.com",
-        creds_file = ".credentials/gmail_creds",  # Local to app directory
+        creds_file = ".credentials/gmail_creds", # Local to app directory
         batch_delay_seconds = 120,
         min_changes_for_email = 1
       )
     }
-    
+
     # Handle creds_file path - support environment variable override
     if (!is.null(email_config$creds_file)) {
       # Check for environment variable override first
@@ -115,11 +120,15 @@ emailNotificationsServer <- function(
         email_config$creds_file <- path.expand(email_config$creds_file)
       }
     }
-    
+
     # Log email configuration at startup
     cat("EMAIL MODULE: Initialized\n")
     cat("  Credentials path:", email_config$creds_file, "\n")
-    cat("  Full path:", normalizePath(email_config$creds_file, mustWork = FALSE), "\n")
+    cat(
+      "  Full path:",
+      normalizePath(email_config$creds_file, mustWork = FALSE),
+      "\n"
+    )
     cat("  Working directory:", getwd(), "\n")
     cat("  Credentials exist:", file.exists(email_config$creds_file), "\n")
     if (!file.exists(email_config$creds_file)) {
@@ -134,8 +143,57 @@ emailNotificationsServer <- function(
       pending_changes = list(),
       batch_timer = NULL,
       is_batching = FALSE,
-      last_sent = NULL
+      last_sent = NULL,
+      current_session_id = NULL # Track current session to detect changes
     )
+
+    # AUTO-CLEAR: Watch for session ID changes and clear pending changes
+    # This ensures old changes don't mix with new data when user loads different session/file
+    if (!is.null(session_id_func)) {
+      observe({
+        new_session_id <- session_id_func()
+        old_session_id <- rv$current_session_id
+
+        # If session ID changed (and we had a previous session), clear pending changes
+        if (
+          !is.null(old_session_id) && !identical(new_session_id, old_session_id)
+        ) {
+          old_count <- length(rv$pending_changes)
+          if (old_count > 0) {
+            cat(
+              "📧 Session changed: ",
+              old_session_id,
+              " → ",
+              new_session_id,
+              "\n"
+            )
+            cat(
+              "📧 Auto-clearing ",
+              old_count,
+              " pending changes from previous session\n"
+            )
+
+            rv$pending_changes <- list()
+            rv$is_batching <- FALSE
+            rv$batch_timer <- NULL
+
+            if (rv$notifications_enabled) {
+              showNotification(
+                paste0(
+                  "Email queue cleared (",
+                  old_count,
+                  " changes from previous session)"
+                ),
+                type = "message",
+                duration = 3
+              )
+            }
+          }
+        }
+
+        rv$current_session_id <- new_session_id
+      })
+    }
 
     # Show setup modal
     observeEvent(input$setup_notifications, {
@@ -184,9 +242,15 @@ emailNotificationsServer <- function(
         showNotification(
           paste0(
             "Email credentials not found!\n",
-            "Looking for: ", email_config$creds_file, "\n",
-            "Full path: ", full_path, "\n",
-            "Working dir: ", getwd(), "\n\n",
+            "Looking for: ",
+            email_config$creds_file,
+            "\n",
+            "Full path: ",
+            full_path,
+            "\n",
+            "Working dir: ",
+            getwd(),
+            "\n\n",
             "Run setup_email.R to create credentials."
           ),
           type = "error",
@@ -198,9 +262,20 @@ emailNotificationsServer <- function(
         cat("  Working dir:", getwd(), "\n")
         cat("  File exists:", file.exists(email_config$creds_file), "\n")
         if (dir.exists(dirname(email_config$creds_file))) {
-          cat("  Directory contents:", paste(list.files(dirname(email_config$creds_file), all.files = TRUE), collapse = ", "), "\n")
+          cat(
+            "  Directory contents:",
+            paste(
+              list.files(dirname(email_config$creds_file), all.files = TRUE),
+              collapse = ", "
+            ),
+            "\n"
+          )
         } else {
-          cat("  Directory does not exist:", dirname(email_config$creds_file), "\n")
+          cat(
+            "  Directory does not exist:",
+            dirname(email_config$creds_file),
+            "\n"
+          )
         }
         return()
       }
@@ -755,7 +830,11 @@ setup_email_credentials <- function(creds_file = NULL) {
   }
 
   cat("\n=== Email Credentials Setup ===\n")
-  cat("Credentials will be saved to:", normalizePath(creds_file, mustWork = FALSE), "\n\n")
+  cat(
+    "Credentials will be saved to:",
+    normalizePath(creds_file, mustWork = FALSE),
+    "\n\n"
+  )
   cat("Please make sure you have:\n")
   cat("1. A Gmail account for the app\n")
   cat("2. 2-factor authentication enabled\n")
