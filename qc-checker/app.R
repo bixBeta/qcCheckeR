@@ -165,16 +165,50 @@ editableTableServer <- function(id, data_rv, counts_rv, storage = NULL, email) {
     ns <- session$ns
     current_data <- reactiveVal()
     deleted_stack <- reactiveVal(list())
+    last_data_id <- reactiveVal(NULL)  # Track data identity to detect changes
+    render_counter <- reactiveVal(0)   # Force re-render on data change
 
+    # React to data_rv$meta changes - this is critical for loading new data
     observe({
-      req(data_rv$meta)
-      if (is.null(current_data())) {
-        current_data(data_rv$meta)
+      meta <- data_rv$meta
+      
+      # Handle NULL case (data was reset)
+      if (is.null(meta)) {
+        if (!is.null(current_data())) {
+          current_data(NULL)
+          deleted_stack(list())
+          last_data_id(NULL)
+          render_counter(render_counter() + 1)
+        }
+        return()
+      }
+      
+      # Create a robust identity hash including actual data content
+      new_data_id <- paste(
+        nrow(meta),
+        ncol(meta),
+        paste(head(meta$label, 5), collapse = ","),
+        paste(tail(meta$label, 2), collapse = ","),
+        digest::digest(meta, algo = "xxhash32"),
+        sep = "_"
+      )
+      
+      # Update current_data if:
+      # 1. It's NULL (first load)
+      # 2. The underlying data has changed (new file/session loaded)
+      if (is.null(current_data()) || is.null(last_data_id()) || new_data_id != last_data_id()) {
+        current_data(meta)
+        deleted_stack(list())  # Clear undo stack when data changes
+        last_data_id(new_data_id)
+        render_counter(render_counter() + 1)  # Force table re-render
       }
     })
 
     output$table <- renderReactable({
       req(current_data())
+      # Depend on render_counter to force re-render
+      render_counter()
+      
       reactable(
         current_data(),
         highlight = TRUE,
@@ -183,6 +217,8 @@ editableTableServer <- function(id, data_rv, counts_rv, storage = NULL, email) {
         compact = TRUE,
         resizable = TRUE,
         defaultPageSize = 10,
+        showPageSizeOptions = TRUE,
+        pageSizeOptions = c(10, 25, 50),
         onClick = "select",
         selection = "single",
         theme = reactableTheme(
@@ -762,7 +798,17 @@ linkedTableServer <- function(id, counts_rv, meta_data, pca_rv = NULL) {
         resizable = TRUE,
         compact = TRUE,
         defaultPageSize = 15,
-        theme = reactableTheme(stripedColor = "#f8f9fa")
+        showPageSizeOptions = TRUE,
+        pageSizeOptions = c(15, 50, 100),
+        searchable = TRUE,
+        filterable = FALSE,
+        striped = TRUE,
+        highlight = TRUE,
+        bordered = TRUE,
+        theme = reactableTheme(
+          stripedColor = "#f8f9fa",
+          searchInputStyle = list(width = "200px")
+        )
       )
     })
 
@@ -836,6 +882,38 @@ ui <- function(request) {
               $('#save_now_global').removeClass('btn-warning').addClass('btn-success');
               $('#save_now_global').html('<i class=\"fa fa-save\"></i> Save Now');
             }
+          });
+          
+          // Force UI refresh handler - fixes scroll freezing issues
+          Shiny.addCustomMessageHandler('forceUIRefresh', function(msg) {
+            console.log('Forcing UI refresh...');
+            
+            // Reset scroll position on all scrollable elements
+            $('html, body').scrollTop(0);
+            $('.tab-content').scrollTop(0);
+            $('.card-body').scrollTop(0);
+            $('[style*=\"overflow\"]').scrollTop(0);
+            
+            // Force reflow/repaint
+            document.body.style.display = 'none';
+            document.body.offsetHeight; // Trigger reflow
+            document.body.style.display = '';
+            
+            // Clear any stuck Plotly plots
+            if (window.Plotly) {
+              $('.js-plotly-plot').each(function() {
+                try {
+                  Plotly.purge(this);
+                } catch(e) {}
+              });
+            }
+            
+            // Rebind Shiny inputs/outputs after a short delay
+            setTimeout(function() {
+              Shiny.bindAll(document.body);
+            }, 100);
+            
+            console.log('UI refresh complete');
           });
         });
       ")),
@@ -989,11 +1067,92 @@ ui <- function(request) {
                 div(
                   class = "mt-4",
                   style = "padding: 10px; background: #f8f9fa; border-radius: 6px;",
-                  icon("info-circle", class = "text-info"),
+                  icon("shield-halved", class = "text-info"),
                   span(
                     class = "text-muted small",
-                    " Your email links your sessions across QC-CheckeR, DEG-Explorer, and other pipeline apps."
+                    " Your sessions are protected with a PIN. Only you can access your data."
                   )
+                )
+              )
+            ),
+            
+            # PIN Entry (for existing users)
+            conditionalPanel(
+              condition = "output.needs_pin_entry",
+              hr(),
+              div(
+                style = "background: #e8f4fd; border: 1px solid #b8daff; border-radius: 8px; padding: 20px;",
+                h5(icon("lock"), " Enter Your PIN"),
+                fluidRow(
+                  column(6,
+                    passwordInput(
+                      "pin_entry",
+                      label = "PIN (4-6 digits)",
+                      placeholder = "••••",
+                      width = "100%"
+                    )
+                  ),
+                  column(6,
+                    div(
+                      style = "margin-top: 32px;",
+                      actionButton(
+                        "verify_pin",
+                        "Unlock",
+                        icon = icon("unlock"),
+                        class = "btn-primary",
+                        width = "100%"
+                      )
+                    )
+                  )
+                ),
+                tags$small(
+                  class = "text-muted",
+                  icon("info-circle"), " 5 failed attempts will lock your account for 30 minutes."
+                )
+              )
+            ),
+            
+            # PIN Creation (for new users or users without PIN)
+            conditionalPanel(
+              condition = "output.needs_pin_creation",
+              hr(),
+              div(
+                style = "background: #e8f5e9; border: 1px solid #c3e6cb; border-radius: 8px; padding: 20px;",
+                h5(icon("key"), " Create Your PIN"),
+                p(class = "text-muted small", "Choose a 4-6 digit PIN to secure your sessions."),
+                fluidRow(
+                  column(4,
+                    passwordInput(
+                      "pin_create",
+                      label = "Create PIN",
+                      placeholder = "••••",
+                      width = "100%"
+                    )
+                  ),
+                  column(4,
+                    passwordInput(
+                      "pin_confirm",
+                      label = "Confirm PIN",
+                      placeholder = "••••",
+                      width = "100%"
+                    )
+                  ),
+                  column(4,
+                    div(
+                      style = "margin-top: 32px;",
+                      actionButton(
+                        "create_pin",
+                        "Create PIN",
+                        icon = icon("check"),
+                        class = "btn-success",
+                        width = "100%"
+                      )
+                    )
+                  )
+                ),
+                tags$small(
+                  class = "text-muted",
+                  icon("info-circle"), " Remember your PIN! You'll need it to access your sessions."
                 )
               )
             )
@@ -1002,7 +1161,7 @@ ui <- function(request) {
         
         br(),
         
-        # Step 2: Session Selection (shown after email validated)
+        # Step 2: Session Selection (shown after PIN verified)
         conditionalPanel(
           condition = "output.user_authenticated",
           card(
@@ -1014,7 +1173,7 @@ ui <- function(request) {
             ),
             card_body(
               fluidRow(
-                column(4,
+                column(6,
                   h6(icon("folder-open"), " Load Existing Session"),
                   uiOutput("existing_sessions_ui"),
                   br(),
@@ -1025,7 +1184,7 @@ ui <- function(request) {
                     class = "btn-outline-secondary btn-sm"
                   )
                 ),
-                column(4,
+                column(6,
                   h6(icon("plus"), " Start Fresh"),
                   p(class = "text-muted small", 
                     "Upload a new .RData file to begin analysis"),
@@ -1034,18 +1193,6 @@ ui <- function(request) {
                     "New Session",
                     icon = icon("plus"),
                     class = "btn-success",
-                    width = "100%"
-                  )
-                ),
-                column(4,
-                  h6(icon("flask"), " Try Example Data"),
-                  p(class = "text-muted small",
-                    "20 samples, 4 groups - great for learning"),
-                  actionButton(
-                    "load_example",
-                    "Load Example",
-                    icon = icon("flask"),
-                    class = "btn-outline-primary",
                     width = "100%"
                   )
                 )
@@ -1061,6 +1208,37 @@ ui <- function(request) {
         
         br(),
         
+        # Try Example Data - Always visible (no authentication required)
+        card(
+          card_header(
+            class = "bg-light",
+            tagList(
+              icon("flask", class = "text-primary"),
+              " Try Without Signing Up"
+            )
+          ),
+          card_body(
+            h6(icon("flask"), " Load Example Data"),
+            p(class = "text-muted small", 
+              "20 samples, 4 groups - explore the app without an account"),
+            actionButton(
+              "load_example",
+              "Load Example",
+              icon = icon("flask"),
+              class = "btn-secondary",
+              width = "20%"
+            ),
+            br(), br(),
+            tags$small(
+              class = "text-muted",
+              icon("info-circle"),
+              " Note: Example data won't be saved. Sign up to save your work."
+            )
+          )
+        ),
+        
+        br(),
+        
         # Help section
         card(
           card_header("How it works"),
@@ -1068,7 +1246,11 @@ ui <- function(request) {
             class = "small",
             tags$ul(
               tags$li(
-                tags$strong("Email-based sessions: "),
+                tags$strong("PIN-protected sessions: "),
+                "Your sessions are secured with a 4-6 digit PIN that only you know"
+              ),
+              tags$li(
+                tags$strong("Email-based access: "),
                 "Your email links all your sessions across the RNA-Seq pipeline"
               ),
               tags$li(
@@ -1136,14 +1318,18 @@ ui <- function(request) {
         h4(icon("rocket"), " Quick Start Guide"),
         tags$ol(
           tags$li(
-            tags$strong("Enter Your Email: "),
-            "Go to the ", tags$em("Start"), " tab and enter your email address to access your sessions."
+            tags$strong("Try Without Signing Up (Optional): "),
+            "Click 'Load Example Data' on the Start tab to explore the app with sample RNA-Seq data."
+          ),
+          tags$li(
+            tags$strong("Enter Your Email & PIN: "),
+            "To save your work, enter your email and create a 4-6 digit PIN. ",
+            "Returning users enter their existing PIN."
           ),
           tags$li(
             tags$strong("Upload Data: "),
             "Upload an ", tags$code(".RData"), 
-            " file containing a ", tags$code("counts"), " matrix and ", tags$code("metadata"), " data frame, ",
-            "or click 'Load Example Data' to try the app."
+            " file containing a ", tags$code("counts"), " matrix and ", tags$code("metadata"), " data frame."
           ),
           tags$li(
             tags$strong("Save Your Session: "),
@@ -1497,7 +1683,7 @@ ui <- function(request) {
             ),
             card_body(
               withSpinner(
-                DT::dataTableOutput("annotation_table"),
+                reactableOutput("annotation_table"),
                 type = 4,
                 color = "#0dcaf0"
               ),
@@ -1946,6 +2132,84 @@ server <- function(input, output, session) {
   
   # Initialize meta_out
   meta_out <- reactiveValues(data = NULL)
+  
+  # =================================================
+  # HELPER: Reset All Data (call before loading new data)
+  # =================================================
+  # This function completely purges all reactive data to ensure
+
+  # a clean slate before loading new data (example, session, or upload)
+  
+  # Reset token to force UI components to re-render
+  reset_token <- reactiveVal(0)
+  
+  reset_all_data <- function(reset_session_id = FALSE, reset_ui = TRUE) {
+    # Increment reset token to invalidate any cached UI state
+    reset_token(reset_token() + 1)
+    
+    # Force JavaScript UI refresh to fix scroll issues
+    session$sendCustomMessage("forceUIRefresh", list(token = reset_token()))
+    
+    # Reset data reactive values
+    data_rv$meta <- NULL
+    data_rv$orig_meta <- NULL
+    data_rv$counts <- NULL
+    data_rv$orig_counts <- NULL
+    
+    # Reset counts reactive values
+    counts_rv$counts <- NULL
+    counts_rv$orig_counts <- NULL
+    
+    # Reset PCA reactive values
+    pca_rv$pca_result <- NULL
+    pca_rv$pca_data <- NULL
+    pca_rv$computed <- FALSE
+    
+    # Reset annotation reactive values
+    annotation_rv$annotated_data <- NULL
+    annotation_rv$ready <- FALSE
+    annotation_rv$method <- NULL
+    
+    # Reset meta_out (editable table module data)
+    meta_out$data <- NULL
+    
+    # Reset session tracking if requested
+    if (reset_session_id) {
+      user_rv$current_session_id <- NULL
+      user_rv$current_file_name <- NULL
+    }
+    
+    # Reset unsaved changes tracking
+    user_rv$has_unsaved_changes <- FALSE
+    user_rv$last_save_time <- NULL
+    session$sendCustomMessage("setUnsavedChanges", FALSE)
+    
+    # Reset file input
+    shinyjs::reset("file")
+    
+    # Reset UI inputs to defaults if requested
+    if (reset_ui) {
+      # Reset plot options
+      updateTextInput(session, "plot_title", value = "PCA Score Plot")
+      updateSliderInput(session, "plot_point_size", value = 20)
+      updateSliderInput(session, "plot_point_opacity", value = 1)
+      tryCatch({
+        colourpicker::updateColourInput(session, "gradient_color1", value = "#636EFA")
+        colourpicker::updateColourInput(session, "gradient_color2", value = "#EF553B")
+        colourpicker::updateColourInput(session, "gradient_color3", value = "#00CC96")
+      }, error = function(e) NULL)
+      updateCheckboxInput(session, "plot_show_grid", value = TRUE)
+      updateCheckboxInput(session, "plot_show_legend", value = TRUE)
+      updateSelectInput(session, "plot_bg_color", selected = "#fffef0")
+      
+      # Reset PCA parameters
+      updateCheckboxInput(session, "vst_blind", value = TRUE)
+      updateSelectInput(session, "vst_fitType", selected = "parametric")
+      updateNumericInput(session, "pca_ntop", value = 500)
+      updateSelectInput(session, "pca_pc_x", selected = 1)
+      updateSelectInput(session, "pca_pc_y", selected = 2)
+    }
+  }
 
   # =================================================
   # GLOBAL SAVE BUTTON - Uses new user session system
@@ -1960,18 +2224,21 @@ server <- function(input, output, session) {
   # Track data changes to mark as unsaved
   observe({
     # These triggers indicate data has changed
-    data_rv$meta
-    pca_rv$computed
-    annotation_rv$ready
+    meta_changed <- data_rv$meta
+    pca_changed <- pca_rv$computed
+    anno_changed <- annotation_rv$ready
     
     # Only mark as unsaved if we have data and a session
-    if (!is.null(data_rv$meta) && user_rv$authenticated) {
-      # Don't mark as unsaved on initial load
-      if (!is.null(user_rv$last_save_time)) {
-        user_rv$has_unsaved_changes <- TRUE
-        session$sendCustomMessage("setUnsavedChanges", TRUE)
+    # Use isolate to prevent reading these values from triggering the observer
+    isolate({
+      if (!is.null(meta_changed) && user_rv$authenticated) {
+        # Don't mark as unsaved on initial load
+        if (!is.null(user_rv$last_save_time) && !user_rv$has_unsaved_changes) {
+          user_rv$has_unsaved_changes <- TRUE
+          session$sendCustomMessage("setUnsavedChanges", TRUE)
+        }
       }
-    }
+    })
   })
   
   # When session is loaded, don't mark as unsaved initially
@@ -2038,14 +2305,16 @@ server <- function(input, output, session) {
     computed = FALSE
   )
 
-  # Update counts_rv when data changes
+  # Update counts_rv when data changes - only if not already set
   observe({
     req(data_rv$counts)
-    if (is.null(counts_rv$counts)) {
+    # Only update if counts_rv is empty AND data_rv has data
+    # This prevents the observer from running during normal edits
+    if (is.null(counts_rv$counts) && !is.null(data_rv$counts)) {
       counts_rv$counts <- data_rv$counts
       counts_rv$orig_counts <- data_rv$orig_counts
     }
-  })
+  }, priority = -1)  # Lower priority to run after other observers
 
   # =================================================
   # INITIALIZE MODULES
@@ -2059,12 +2328,17 @@ server <- function(input, output, session) {
   user_rv <- reactiveValues(
     email = NULL,
     email_hash = NULL,
-    authenticated = FALSE,
+    email_valid = FALSE,         # Email format is valid
+    user_exists = FALSE,         # User exists in registry
+    needs_pin_creation = FALSE,  # New user needs to create PIN
+    needs_pin_entry = FALSE,     # Existing user needs to enter PIN
+    pin_verified = FALSE,        # PIN has been verified
+    authenticated = FALSE,       # Fully authenticated (email + PIN)
     current_session_id = NULL,
-    current_file_name = NULL,  # Track original file name across session loads
+    current_file_name = NULL,
     sessions_list = list(),
-    has_unsaved_changes = FALSE,  # Track unsaved changes
-    last_save_time = NULL  # Track when last saved
+    has_unsaved_changes = FALSE,
+    last_save_time = NULL
   )
   
   # Email validation (debounced)
@@ -2076,24 +2350,36 @@ server <- function(input, output, session) {
     if (is_valid_email(email)) {
       user_rv$email <- tolower(trimws(email))
       user_rv$email_hash <- hash_email(user_rv$email)
-      user_rv$authenticated <- TRUE
+      user_rv$email_valid <- TRUE
       
-      # Ensure user directory exists
-      user_dir <- get_user_session_dir(SESSIONS_BASE_PATH, user_rv$email, APP_NAME)
-      if (!dir.exists(user_dir)) {
-        dir.create(user_dir, recursive = TRUE)
+      # Check if user exists and has PIN
+      if (user_exists(user_rv$email, SESSIONS_BASE_PATH)) {
+        user_rv$user_exists <- TRUE
+        if (user_has_pin(user_rv$email, SESSIONS_BASE_PATH)) {
+          # Existing user with PIN - needs to enter it
+          user_rv$needs_pin_entry <- TRUE
+          user_rv$needs_pin_creation <- FALSE
+        } else {
+          # Existing user without PIN - needs to create one
+          user_rv$needs_pin_creation <- TRUE
+          user_rv$needs_pin_entry <- FALSE
+        }
+      } else {
+        # New user - needs to create PIN
+        user_rv$user_exists <- FALSE
+        user_rv$needs_pin_creation <- TRUE
+        user_rv$needs_pin_entry <- FALSE
       }
       
-      # Register user if new
-      register_user(user_rv$email, SESSIONS_BASE_PATH)
+      # Not authenticated until PIN is verified
+      user_rv$authenticated <- user_rv$pin_verified
       
-      # Load user's session list
-      user_rv$sessions_list <- get_user_sessions(
-        user_rv$email, 
-        APP_NAME, 
-        SESSIONS_BASE_PATH
-      )
     } else {
+      user_rv$email_valid <- FALSE
+      user_rv$user_exists <- FALSE
+      user_rv$needs_pin_creation <- FALSE
+      user_rv$needs_pin_entry <- FALSE
+      user_rv$pin_verified <- FALSE
       user_rv$authenticated <- FALSE
     }
   })
@@ -2104,6 +2390,18 @@ server <- function(input, output, session) {
   })
   outputOptions(output, "user_authenticated", suspendWhenHidden = FALSE)
   
+  # Output for PIN entry panel
+  output$needs_pin_entry <- reactive({
+    user_rv$email_valid && user_rv$needs_pin_entry && !user_rv$pin_verified
+  })
+  outputOptions(output, "needs_pin_entry", suspendWhenHidden = FALSE)
+  
+  # Output for PIN creation panel
+  output$needs_pin_creation <- reactive({
+    user_rv$email_valid && user_rv$needs_pin_creation && !user_rv$pin_verified
+  })
+  outputOptions(output, "needs_pin_creation", suspendWhenHidden = FALSE)
+  
   # Email validation status
   output$email_validation_status <- renderUI({
     email <- input$user_email
@@ -2113,10 +2411,22 @@ server <- function(input, output, session) {
     }
     
     if (is_valid_email(email)) {
-      span(
-        class = "text-success small",
-        icon("check-circle"), " Valid email - your sessions are linked"
-      )
+      if (user_rv$pin_verified) {
+        span(
+          class = "text-success small",
+          icon("check-circle"), " Authenticated"
+        )
+      } else if (user_rv$user_exists) {
+        span(
+          class = "text-info small",
+          icon("user"), " Welcome back! Enter your PIN below."
+        )
+      } else {
+        span(
+          class = "text-info small",
+          icon("user-plus"), " New user - create a PIN below."
+        )
+      }
     } else {
       span(
         class = "text-danger small",
@@ -2125,64 +2435,216 @@ server <- function(input, output, session) {
     }
   })
   
+  # PIN Entry Handler
+  observeEvent(input$verify_pin, {
+    req(user_rv$email, input$pin_entry)
+    
+    pin <- input$pin_entry
+    
+    result <- verify_user_pin(user_rv$email, pin, SESSIONS_BASE_PATH)
+    
+    if (result$success) {
+      # PIN verified - complete authentication
+      user_rv$pin_verified <- TRUE
+      user_rv$authenticated <- TRUE
+      user_rv$needs_pin_entry <- FALSE
+      
+      # Ensure user directory exists
+      user_dir <- get_user_session_dir(SESSIONS_BASE_PATH, user_rv$email, APP_NAME)
+      if (!dir.exists(user_dir)) {
+        dir.create(user_dir, recursive = TRUE)
+      }
+      
+      # Load user's session list
+      user_rv$sessions_list <- get_user_sessions(
+        user_rv$email, 
+        APP_NAME, 
+        SESSIONS_BASE_PATH
+      )
+      
+      # Log activity
+      log_session_activity(
+        base_path = SESSIONS_BASE_PATH,
+        email = user_rv$email,
+        session_id = "login",
+        app_name = APP_NAME,
+        action = "login_success"
+      )
+      
+      showNotification(
+        paste("Welcome back,", user_rv$email),
+        type = "message",
+        duration = 3
+      )
+      
+      # Clear PIN input
+      updateTextInput(session, "pin_entry", value = "")
+      
+    } else {
+      # PIN verification failed
+      if (result$locked) {
+        showNotification(result$error, type = "error", duration = 10)
+      } else {
+        showNotification(result$error, type = "warning", duration = 5)
+      }
+      
+      # Log failed attempt
+      log_session_activity(
+        base_path = SESSIONS_BASE_PATH,
+        email = user_rv$email,
+        session_id = "login",
+        app_name = APP_NAME,
+        action = "login_failed"
+      )
+    }
+  })
+  
+  # PIN Creation Handler
+  observeEvent(input$create_pin, {
+    req(user_rv$email, input$pin_create, input$pin_confirm)
+    
+    pin1 <- input$pin_create
+    pin2 <- input$pin_confirm
+    
+    # Validate PIN format
+    if (!is_valid_pin(pin1)) {
+      showNotification("PIN must be 4-6 digits", type = "error")
+      return()
+    }
+    
+    # Check PINs match
+    if (pin1 != pin2) {
+      showNotification("PINs do not match", type = "error")
+      return()
+    }
+    
+    # Set the PIN
+    if (set_user_pin(user_rv$email, pin1, SESSIONS_BASE_PATH)) {
+      # PIN created - complete authentication
+      user_rv$pin_verified <- TRUE
+      user_rv$authenticated <- TRUE
+      user_rv$needs_pin_creation <- FALSE
+      user_rv$user_exists <- TRUE
+      
+      # Register user if new
+      register_user(user_rv$email, SESSIONS_BASE_PATH)
+      
+      # Ensure user directory exists
+      user_dir <- get_user_session_dir(SESSIONS_BASE_PATH, user_rv$email, APP_NAME)
+      if (!dir.exists(user_dir)) {
+        dir.create(user_dir, recursive = TRUE)
+      }
+      
+      # Load user's session list
+      user_rv$sessions_list <- get_user_sessions(
+        user_rv$email, 
+        APP_NAME, 
+        SESSIONS_BASE_PATH
+      )
+      
+      # Log activity
+      log_session_activity(
+        base_path = SESSIONS_BASE_PATH,
+        email = user_rv$email,
+        session_id = "registration",
+        app_name = APP_NAME,
+        action = "pin_created"
+      )
+      
+      showNotification(
+        "PIN created! You can now access your sessions.",
+        type = "message",
+        duration = 3
+      )
+      
+      # Clear PIN inputs
+      updateTextInput(session, "pin_create", value = "")
+      updateTextInput(session, "pin_confirm", value = "")
+      
+    } else {
+      showNotification("Failed to create PIN. Please try again.", type = "error")
+    }
+  })
+  
   # Existing sessions UI
   output$existing_sessions_ui <- renderUI({
     req(user_rv$authenticated)
     
     sessions <- user_rv$sessions_list
+    session_count <- length(sessions)
     
-    if (length(sessions) == 0) {
+    tagList(
+      # Session count indicator
       div(
-        class = "text-muted small p-2",
-        icon("folder-open"),
-        " No saved sessions yet"
-      )
-    } else {
-      div(
-        style = "max-height: 300px; overflow-y: auto;",
-        lapply(seq_along(sessions), function(i) {
-          sess <- sessions[[i]]
-          file_display <- sess$file_name %||% "Unnamed"
-          div(
-            class = "card mb-2 session-card",
-            style = "cursor: pointer;",
-            onclick = sprintf(
-              "Shiny.setInputValue('select_session', '%s', {priority: 'event'})",
-              sess$session_id
-            ),
+        class = "d-flex justify-content-between align-items-center mb-2",
+        tags$small(
+          class = if (session_count >= MAX_SESSIONS_PER_USER) "text-warning" else "text-muted",
+          icon(if (session_count >= MAX_SESSIONS_PER_USER) "exclamation-triangle" else "database"),
+          paste0(" ", session_count, "/", MAX_SESSIONS_PER_USER, " sessions")
+        )
+      ),
+      
+      if (session_count == 0) {
+        div(
+          class = "text-muted small p-2",
+          icon("folder-open"),
+          " No saved sessions yet"
+        )
+      } else {
+        div(
+          style = "max-height: 300px; overflow-y: auto;",
+          lapply(seq_along(sessions), function(i) {
+            sess <- sessions[[i]]
+            file_display <- sess$file_name %||% "Unnamed"
             div(
-              class = "card-body py-2 px-3",
+              class = "card mb-2 session-card",
+              style = "cursor: pointer;",
+              onclick = sprintf(
+                "Shiny.setInputValue('select_session', '%s', {priority: 'event'})",
+                sess$session_id
+              ),
               div(
-                strong(class = "small", file_display),
-                br(),
-                tags$code(
-                  class = "small",
-                  style = "font-size: 0.7em; word-break: break-all;",
-                  sess$session_id
-                ),
-                br(),
+                class = "card-body py-2 px-3",
                 div(
-                  class = "d-flex justify-content-between align-items-center mt-1",
-                  tags$small(
-                    class = "text-muted",
-                    icon("clock"),
-                    format(as.POSIXct(sess$updated %||% sess$created), "%m/%d %H:%M")
+                  strong(class = "small", file_display),
+                  br(),
+                  tags$code(
+                    class = "small",
+                    style = "font-size: 0.7em; word-break: break-all;",
+                    sess$session_id
                   ),
+                  br(),
                   div(
-                    if (isTRUE(sess$has_pca)) {
-                      span(class = "badge bg-success me-1", style = "font-size: 0.65em;", "PCA")
-                    },
-                    if (isTRUE(sess$has_annotations)) {
-                      span(class = "badge bg-info", style = "font-size: 0.65em;", "Anno")
-                    }
+                    class = "d-flex justify-content-between align-items-center mt-1",
+                    tags$small(
+                      class = "text-muted",
+                      icon("clock"),
+                      {
+                        # Parse ISO format timestamp
+                        time_str <- sess$updated %||% sess$created
+                        parsed_time <- tryCatch(
+                          as.POSIXct(time_str, format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+                          error = function(e) as.POSIXct(time_str)
+                        )
+                        format(parsed_time, "%m/%d %H:%M")
+                      }
+                    ),
+                    div(
+                      if (isTRUE(sess$has_pca)) {
+                        span(class = "badge bg-success me-1", style = "font-size: 0.65em;", "PCA")
+                      },
+                      if (isTRUE(sess$has_annotations)) {
+                        span(class = "badge bg-info", style = "font-size: 0.65em;", "Anno")
+                      }
+                    )
                   )
                 )
               )
-            )
           )
         })
       )
-    }
+      }
+    )
   })
   
   # Current session card
@@ -2374,6 +2836,36 @@ server <- function(input, output, session) {
         type = "warning",
         duration = 4
       )
+      return(FALSE)
+    }
+    
+    # Check session limit if this is a NEW session (not updating existing)
+    is_new_session <- is.null(user_rv$current_session_id) || 
+      !any(sapply(user_rv$sessions_list, function(s) s$session_id == user_rv$current_session_id))
+    
+    if (is_new_session && length(user_rv$sessions_list) >= MAX_SESSIONS_PER_USER) {
+      # Show limit reached modal
+      showModal(modalDialog(
+        title = tagList(icon("exclamation-triangle"), " Session Limit Reached"),
+        div(
+          style = "text-align: center;",
+          p(
+            style = "font-size: 1.1em;",
+            "You have reached the maximum of ",
+            tags$strong(MAX_SESSIONS_PER_USER),
+            " saved sessions."
+          ),
+          hr(),
+          p("Please delete an existing session before saving a new one."),
+          p(
+            class = "text-muted small",
+            "Click on a session in the 'Load Existing Session' list to delete it."
+          )
+        ),
+        footer = modalButton("OK"),
+        size = "m",
+        easyClose = TRUE
+      ))
       return(FALSE)
     }
     
@@ -2636,18 +3128,120 @@ server <- function(input, output, session) {
   # =================================================
   # SESSION MANAGEMENT
   # =================================================
+  
+  # Maximum sessions per user
+  MAX_SESSIONS_PER_USER <- 5
+  
+  # Store selected session for modal actions
+  selected_session_rv <- reactiveVal(NULL)
 
-  # Load session when user clicks on a session card
+  # Show session options modal when user clicks on a session card
   observeEvent(input$select_session, {
     req(user_rv$authenticated)
     session_id <- input$select_session
-
+    
+    # Find session info from list
+    session_info <- NULL
+    for (sess in user_rv$sessions_list) {
+      if (sess$session_id == session_id) {
+        session_info <- sess
+        break
+      }
+    }
+    
+    if (is.null(session_info)) {
+      showNotification("Session not found", type = "error")
+      return()
+    }
+    
+    # Store selected session
+    selected_session_rv(session_id)
+    
+    # Parse timestamp
+    time_str <- session_info$updated %||% session_info$created
+    parsed_time <- tryCatch(
+      format(as.POSIXct(time_str, format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"), "%Y-%m-%d %H:%M"),
+      error = function(e) time_str
+    )
+    
+    # Build info display
+    file_name <- session_info$file_name %||% "Unknown"
+    samples <- session_info$samples %||% "?"
+    has_pca <- isTRUE(session_info$has_pca)
+    has_anno <- isTRUE(session_info$has_annotations)
+    
+    showModal(modalDialog(
+      title = tagList(icon("folder-open"), " Session Options"),
+      
+      # Session info card
+      div(
+        style = "background: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 15px;",
+        h5(file_name, style = "margin-bottom: 10px;"),
+        tags$table(
+          style = "width: 100%;",
+          tags$tr(
+            tags$td(tags$strong("Session ID:"), style = "padding: 5px 10px 5px 0;"),
+            tags$td(tags$code(session_id, style = "font-size: 0.85em;"))
+          ),
+          tags$tr(
+            tags$td(tags$strong("Last Updated:"), style = "padding: 5px 10px 5px 0;"),
+            tags$td(parsed_time)
+          ),
+          tags$tr(
+            tags$td(tags$strong("Samples:"), style = "padding: 5px 10px 5px 0;"),
+            tags$td(samples)
+          ),
+          tags$tr(
+            tags$td(tags$strong("Analysis:"), style = "padding: 5px 10px 5px 0;"),
+            tags$td(
+              if (has_pca) span(class = "badge bg-success me-1", "PCA"),
+              if (has_anno) span(class = "badge bg-info", "Annotated"),
+              if (!has_pca && !has_anno) span(class = "text-muted", "None yet")
+            )
+          )
+        )
+      ),
+      
+      # Action buttons
+      div(
+        style = "display: flex; gap: 10px;",
+        actionButton(
+          "modal_load_session",
+          "Load Session",
+          icon = icon("folder-open"),
+          class = "btn-primary flex-grow-1"
+        ),
+        actionButton(
+          "modal_delete_session",
+          "Delete",
+          icon = icon("trash"),
+          class = "btn-outline-danger"
+        )
+      ),
+      
+      footer = modalButton("Cancel"),
+      size = "m",
+      easyClose = TRUE
+    ))
+  })
+  
+  # Handle Load Session from modal
+  observeEvent(input$modal_load_session, {
+    req(selected_session_rv())
+    session_id <- selected_session_rv()
+    removeModal()
+    
     tryCatch({
       # Create progress bar
       progress <- Progress$new()
       on.exit(progress$close())
       
       progress$set(message = "Loading session", value = 0)
+      progress$set(value = 0.1, detail = "Preparing...")
+      
+      # IMPORTANT: Reset all data before loading new session
+      reset_all_data(reset_session_id = TRUE, reset_ui = FALSE)
+      
       progress$set(value = 0.2, detail = "Reading session file...")
 
       # Load from user's session directory
@@ -2674,6 +3268,8 @@ server <- function(input, output, session) {
       data_rv$orig_meta <- session_data$file_data$metadata
       data_rv$counts <- session_data$current_edits$counts
       data_rv$orig_counts <- session_data$file_data$counts
+      counts_rv$counts <- session_data$current_edits$counts
+      counts_rv$orig_counts <- session_data$file_data$counts
         
       progress$set(value = 0.6, detail = "Restoring count data...")
         
@@ -2755,6 +3351,9 @@ server <- function(input, output, session) {
 
       progress$set(value = 1, detail = "Complete!")
       Sys.sleep(0.3)
+      
+      # Force UI refresh to fix scroll issues
+      session$sendCustomMessage("forceUIRefresh", list(token = Sys.time()))
         
       showNotification(
         "Session loaded successfully! All edits preserved.",
@@ -2783,15 +3382,100 @@ server <- function(input, output, session) {
       shinyjs::runjs('$("a[data-value=\'editor\']").click();')
 
       # Track session load
-      email$track_change(
-        type = "Session Loaded",
-        details = glue::glue(
-          "Loaded existing session with {nrow(data_rv$meta)} samples"
+      tryCatch({
+        email$track_change(
+          type = "Session Loaded",
+          details = glue::glue(
+            "Loaded existing session with {nrow(data_rv$meta)} samples"
+          )
         )
-      )
+      }, error = function(e) NULL)
+      
     }, error = function(e) {
       showNotification(
         paste("Error loading session:", e$message),
+        type = "error",
+        duration = 5
+      )
+    })
+  })
+  
+  # Handle Delete Session from modal
+  observeEvent(input$modal_delete_session, {
+    req(selected_session_rv())
+    session_id <- selected_session_rv()
+    
+    # Show confirmation dialog
+    showModal(modalDialog(
+      title = tagList(icon("trash"), " Delete Session?"),
+      div(
+        style = "text-align: center;",
+        p("Are you sure you want to delete this session?"),
+        tags$code(session_id, style = "font-size: 1.1em;"),
+        br(), br(),
+        p(
+          style = "color: #dc3545; font-weight: bold;",
+          icon("exclamation-triangle"),
+          " This action cannot be undone!"
+        )
+      ),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_delete_session", "Yes, Delete", class = "btn-danger")
+      ),
+      size = "m",
+      easyClose = TRUE
+    ))
+  })
+  
+  # Confirm delete session
+  observeEvent(input$confirm_delete_session, {
+    req(selected_session_rv())
+    session_id <- selected_session_rv()
+    removeModal()
+    
+    tryCatch({
+      # Delete the session file
+      session_file <- file.path(
+        get_user_session_dir(SESSIONS_BASE_PATH, user_rv$email, APP_NAME),
+        paste0(session_id, ".rds")
+      )
+      
+      if (file.exists(session_file)) {
+        file.remove(session_file)
+      }
+      
+      # Remove from registry
+      delete_session(user_rv$email, APP_NAME, session_id, SESSIONS_BASE_PATH)
+      
+      # Log deletion
+      log_session_activity(
+        base_path = SESSIONS_BASE_PATH,
+        email = user_rv$email,
+        session_id = session_id,
+        app_name = APP_NAME,
+        action = "deleted"
+      )
+      
+      # Refresh sessions list
+      user_rv$sessions_list <- get_user_sessions(
+        user_rv$email, 
+        APP_NAME, 
+        SESSIONS_BASE_PATH
+      )
+      
+      # Clear selection
+      selected_session_rv(NULL)
+      
+      showNotification(
+        paste("Session deleted:", session_id),
+        type = "message",
+        duration = 3
+      )
+      
+    }, error = function(e) {
+      showNotification(
+        paste("Error deleting session:", e$message),
         type = "error",
         duration = 5
       )
@@ -2823,54 +3507,12 @@ server <- function(input, output, session) {
   observeEvent(input$confirm_new_session, {
     removeModal()
     
-    # Reset all data reactive values
-    data_rv$meta <- NULL
-    data_rv$orig_meta <- NULL
-    data_rv$counts <- NULL
-    data_rv$orig_counts <- NULL
-    
-    # Reset counts reactive values
-    counts_rv$counts <- NULL
-    counts_rv$orig_counts <- NULL
-    
-    # Reset PCA reactive values
-    pca_rv$pca_result <- NULL
-    pca_rv$pca_data <- NULL
-    pca_rv$computed <- FALSE
-    
-    # Reset annotation reactive values
-    annotation_rv$annotated_data <- NULL
-    annotation_rv$ready <- FALSE
-    annotation_rv$method <- NULL
-    
-    # Reset meta_out
-    meta_out$data <- NULL
-    
-    # Reset file input
-    shinyjs::reset("file")
+    # Complete reset of all data
+    reset_all_data(reset_session_id = TRUE, reset_ui = TRUE)
     
     # Create new session ID
     new_session_id <- generate_session_id()
     user_rv$current_session_id <- new_session_id
-    user_rv$current_file_name <- NULL  # Reset file name for new session
-    
-    # Reset plot options to defaults
-    updateTextInput(session, "plot_title", value = "PCA Score Plot")
-    updateSliderInput(session, "plot_point_size", value = 20)
-    updateSliderInput(session, "plot_point_opacity", value = 1)
-    colourpicker::updateColourInput(session, "gradient_color1", value = "#636EFA")
-    colourpicker::updateColourInput(session, "gradient_color2", value = "#EF553B")
-    colourpicker::updateColourInput(session, "gradient_color3", value = "#00CC96")
-    updateCheckboxInput(session, "plot_show_grid", value = TRUE)
-    updateCheckboxInput(session, "plot_show_legend", value = TRUE)
-    updateSelectInput(session, "plot_bg_color", selected = "#fffef0")
-    
-    # Reset PCA parameters to defaults
-    updateCheckboxInput(session, "vst_blind", value = TRUE)
-    updateSelectInput(session, "vst_fitType", selected = "parametric")
-    updateNumericInput(session, "pca_ntop", value = 500)
-    updateSelectInput(session, "pca_pc_x", selected = 1)
-    updateSelectInput(session, "pca_pc_y", selected = 2)
     
     showNotification(
       glue::glue("New session started: {new_session_id}\nAll data has been cleared."),
@@ -2907,6 +3549,9 @@ server <- function(input, output, session) {
     )
     
     tryCatch({
+      # IMPORTANT: Reset all data before loading new data
+      reset_all_data(reset_session_id = TRUE, reset_ui = TRUE)
+      
       # Load RData file into environment
       env <- new.env()
       load(example_file, envir = env)
@@ -2947,38 +3592,43 @@ server <- function(input, output, session) {
       data_rv$orig_meta <- meta
       data_rv$counts <- cnt
       data_rv$orig_counts <- cnt
-      
-      # Reset PCA
-      pca_rv$pca_result <- NULL
-      pca_rv$pca_data <- NULL
-      pca_rv$computed <- FALSE
-      
-      # Reset annotation
-      annotation_rv$annotated_data <- NULL
-      annotation_rv$ready <- FALSE
-      annotation_rv$method <- NULL
+      counts_rv$counts <- cnt
+      counts_rv$orig_counts <- cnt
       
       # Create new session if authenticated
       if (user_rv$authenticated) {
         user_rv$current_session_id <- generate_session_id()
-        user_rv$current_file_name <- "Example_Data.RData"  # Track example file name
+        user_rv$current_file_name <- "Example_Data.RData"
         user_rv$has_unsaved_changes <- TRUE
-        user_rv$last_save_time <- Sys.time()  # Set time to enable change tracking
+        user_rv$last_save_time <- Sys.time()
         session$sendCustomMessage("setUnsavedChanges", TRUE)
+        
+        showNotification(
+          glue::glue("Example data loaded! Click 'Save Now' to save.\n{nrow(meta)} samples, {nrow(cnt)} genes"),
+          type = "message",
+          duration = 5
+        )
+      } else {
+        # Not authenticated - show different message
+        showNotification(
+          glue::glue("Example data loaded! {nrow(meta)} samples, {nrow(cnt)} genes\nSign up to save your work."),
+          type = "message",
+          duration = 5
+        )
       }
       
-      # Track example data load
-      email$track_change(
-        type = "Example Data Loaded",
-        details = glue::glue("Loaded example dataset with {nrow(meta)} samples, {nrow(cnt)} genes")
-      )
+      # Track example data load (only if email module is active)
+      tryCatch({
+        email$track_change(
+          type = "Example Data Loaded",
+          details = glue::glue("Loaded example dataset with {nrow(meta)} samples, {nrow(cnt)} genes")
+        )
+      }, error = function(e) NULL)
       
       removeNotification("loading_example")
-      showNotification(
-        glue::glue("Example data loaded! Click 'Save Now' to save.\n{nrow(meta)} samples, {nrow(cnt)} genes"),
-        type = "message",
-        duration = 5
-      )
+      
+      # Force UI refresh to fix scroll issues
+      session$sendCustomMessage("forceUIRefresh", list(token = Sys.time()))
       
       # Switch to editor tab
       shinyjs::runjs('$("a[data-value=\'editor\']").click();')
@@ -3035,38 +3685,39 @@ server <- function(input, output, session) {
           select(all_of(common)) %>%
           mutate(across(where(is.numeric), ~ as.integer(round(.x))))
 
+        # IMPORTANT: Reset all data before storing new data
+        reset_all_data(reset_session_id = TRUE, reset_ui = TRUE)
+        
         # Store data in reactive values
         data_rv$meta <- meta
         data_rv$orig_meta <- meta
         data_rv$counts <- cnt
         data_rv$orig_counts <- cnt
-        
-        # Reset PCA on new file upload
-        pca_rv$pca_result <- NULL
-        pca_rv$pca_data <- NULL
-        pca_rv$computed <- FALSE
-        
-        # Reset annotation on new file upload
-        annotation_rv$annotated_data <- NULL
-        annotation_rv$ready <- FALSE
-        annotation_rv$method <- NULL
+        counts_rv$counts <- cnt
+        counts_rv$orig_counts <- cnt
 
         # Create new session if authenticated
         if (user_rv$authenticated) {
           user_rv$current_session_id <- generate_session_id()
-          user_rv$current_file_name <- input$file$name  # Track uploaded file name
+          user_rv$current_file_name <- input$file$name
           user_rv$has_unsaved_changes <- TRUE
-          user_rv$last_save_time <- Sys.time()  # Set time to enable change tracking
+          user_rv$last_save_time <- Sys.time()
           session$sendCustomMessage("setUnsavedChanges", TRUE)
         }
 
         # Track file upload
-        email$track_change(
-          type = "File Upload",
-          details = glue::glue("Uploaded new dataset with {nrow(meta)} samples")
-        )
+        tryCatch({
+          email$track_change(
+            type = "File Upload",
+            details = glue::glue("Uploaded new dataset with {nrow(meta)} samples")
+          )
+        }, error = function(e) NULL)
 
         removeNotification("processing")
+        
+        # Force UI refresh to fix scroll issues
+        session$sendCustomMessage("forceUIRefresh", list(token = Sys.time()))
+        
         showNotification(
           "File Uploaded! Click 'Save Now' to save your session.",
           type = "message",
@@ -3113,9 +3764,11 @@ server <- function(input, output, session) {
     return(data_rv$meta)
   })
   
-  # Keep meta_out for backward compatibility
+  # Keep meta_out for backward compatibility - call the reactive to get the value
   observe({
-    meta_out$data <- meta_module_out$data
+    if (!is.null(meta_module_out) && !is.null(meta_module_out$data)) {
+      meta_out$data <- meta_module_out$data()
+    }
   })
   
   # Initialize summary server - pass the reactive directly
@@ -3130,8 +3783,6 @@ server <- function(input, output, session) {
 
   output$tables_ui <- renderUI({
     req(data_rv$meta, data_rv$counts)
-
-    Sys.sleep(0.5)
 
     # Just return the UI components - servers are already initialized above
     tagList(
@@ -3484,29 +4135,92 @@ server <- function(input, output, session) {
   })
   
   # Render annotation table
-  output$annotation_table <- DT::renderDataTable({
+  output$annotation_table <- renderReactable({
     req(annotation_rv$annotated_data)
     
     # Show annotation columns for preview
     # Include coordinates if available (GTF method)
     cols_to_show <- c("gene_id", "ensembl_id", "gene_name", "description")
     
-    if ("coordinates" %in% colnames(annotation_rv$annotated_data)) {
+    has_coords <- "coordinates" %in% colnames(annotation_rv$annotated_data)
+    if (has_coords) {
       cols_to_show <- c(cols_to_show, "coordinates")
     }
     
     display_data <- annotation_rv$annotated_data %>%
       select(any_of(cols_to_show))
     
-    DT::datatable(
-      display_data,
-      options = list(
-        pageLength = 15,
-        scrollX = TRUE,
-        dom = 'lfrtip'
+    # Build column definitions
+    col_defs <- list(
+      gene_id = colDef(
+        name = "Gene ID",
+        minWidth = 180,
+        filterable = TRUE
       ),
-      rownames = FALSE,
-      class = "display compact stripe hover"
+      ensembl_id = colDef(
+        name = "Ensembl ID", 
+        minWidth = 180,
+        filterable = TRUE
+      ),
+      gene_name = colDef(
+        name = "Gene Name",
+        minWidth = 100,
+        filterable = TRUE
+      ),
+      description = colDef(
+        name = "Description",
+        minWidth = 250,
+        filterable = TRUE
+      )
+    )
+    
+    # Add coordinates column if available - use JS for server-side compatibility
+    if (has_coords) {
+      col_defs$coordinates <- colDef(
+        name = "Coordinates",
+        minWidth = 180,
+        filterable = TRUE,
+        # Use JavaScript cell renderer for server-side compatibility
+        cell = JS("function(cellInfo) {
+          var value = cellInfo.value;
+          if (!value || value === '') return '';
+          var parts = value.split(':');
+          if (parts.length === 3) {
+            var chr = parts[0];
+            var start = parseInt(parts[1]).toLocaleString();
+            var end = parseInt(parts[2]).toLocaleString();
+            return chr + ':' + start + '-' + end;
+          }
+          return value;
+        }")
+      )
+    }
+    
+    reactable(
+      display_data,
+      columns = col_defs,
+      filterable = TRUE,
+      searchable = TRUE,
+      striped = TRUE,
+      highlight = TRUE,
+      bordered = TRUE,
+      compact = TRUE,
+      defaultPageSize = 15,
+      showPageSizeOptions = TRUE,
+      pageSizeOptions = c(10, 15, 25, 50, 100),
+      theme = reactableTheme(
+        borderColor = "#ddd",
+        stripedColor = "#f8f9fa",
+        highlightColor = "#fff3cd",
+        headerStyle = list(
+          borderBottom = "2px solid #dee2e6",
+          fontWeight = "600"
+        ),
+        filterInputStyle = list(
+          paddingTop = "4px",
+          paddingBottom = "4px"
+        )
+      )
     )
   })
   
@@ -4551,6 +5265,7 @@ server <- function(input, output, session) {
     
     DT::datatable(
       display_df,
+      filter = 'top',  # Enable column filters at the top
       caption = htmltools::tags$caption(
         style = "caption-side: top; text-align: left; font-size: 14px; font-weight: bold;",
         paste0(pc_name, " Top Loading Genes (", sprintf("%.1f%%", var_exp), " variance explained)")
