@@ -13,10 +13,10 @@
 #
 # Usage:
 #   source("path/to/module_user_sessions.R")
-#   
+#
 #   # In UI:
 #   userSessionsUI("sessions")
-#   
+#
 #   # In Server:
 #   sessions <- userSessionsServer(
 #     id = "sessions",
@@ -35,9 +35,9 @@ library(digest)
 # =============================================================================
 
 DEFAULT_SETTINGS <- list(
-  retention_days = NULL,        # NULL = keep forever
+  retention_days = NULL, # NULL = keep forever
 
-  max_sessions_per_user = 50,   # Per app
+  max_sessions_per_user = 50, # Per app
   session_prefix = list(
     "qc-checker" = "qc_",
     "deg-explorer" = "deg_",
@@ -53,16 +53,216 @@ DEFAULT_SETTINGS <- list(
 #' @param email User email address
 #' @return 12-character hash string
 hash_email <- function(email) {
-
   substr(digest::digest(tolower(trimws(email)), algo = "sha256"), 1, 12)
+}
+
+#' Hash PIN for secure storage
+#' @param pin User PIN (4-6 digits)
+#' @param salt Salt for hashing (email hash)
+#' @return Hashed PIN string
+hash_pin <- function(pin, salt) {
+  digest::digest(paste0(pin, salt), algo = "sha256")
+}
+
+#' Verify PIN against stored hash
+#' @param pin Entered PIN
+#' @param stored_hash Stored PIN hash
+#' @param salt Salt used for hashing
+#' @return TRUE if PIN matches
+verify_pin <- function(pin, stored_hash, salt) {
+  if (is.null(pin) || is.null(stored_hash)) {
+    return(FALSE)
+  }
+  hash_pin(pin, salt) == stored_hash
+}
+
+#' Validate PIN format (4-6 digits)
+#' @param pin PIN to validate
+#' @return TRUE if valid PIN format
+is_valid_pin <- function(pin) {
+  if (is.null(pin) || is.na(pin)) {
+    return(FALSE)
+  }
+  grepl("^[0-9]{4,6}$", as.character(pin))
+}
+
+#' Check if user exists in registry
+#' @param email User email
+#' @param base_path Base path for sessions storage
+#' @return TRUE if user exists
+user_exists <- function(email, base_path) {
+  registry <- get_registry(base_path)
+  email_hash <- hash_email(email)
+  !is.null(registry$users[[email_hash]])
+}
+
+#' Check if user has a PIN set
+#' @param email User email
+#' @param base_path Base path for sessions storage
+#' @return TRUE if user has PIN
+user_has_pin <- function(email, base_path) {
+  registry <- get_registry(base_path)
+  email_hash <- hash_email(email)
+  user <- registry$users[[email_hash]]
+  !is.null(user) && !is.null(user$pin_hash) && nzchar(user$pin_hash)
+}
+
+#' Set or update user's PIN
+#' @param email User email
+#' @param pin New PIN (will be hashed)
+#' @param base_path Base path for sessions storage
+#' @return TRUE on success
+set_user_pin <- function(email, pin, base_path) {
+  if (!is_valid_pin(pin)) {
+    warning("Invalid PIN format")
+    return(FALSE)
+  }
+
+  registry <- get_registry(base_path)
+  email_hash <- hash_email(email)
+
+  # Create user if doesn't exist
+  if (is.null(registry$users[[email_hash]])) {
+    registry$users[[email_hash]] <- list(
+      email = email,
+      created = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ"),
+      apps = list()
+    )
+  }
+
+  # Set PIN hash
+  registry$users[[email_hash]]$pin_hash <- hash_pin(pin, email_hash)
+  registry$users[[email_hash]]$pin_set_at <- format(
+    Sys.time(),
+    "%Y-%m-%dT%H:%M:%SZ"
+  )
+  registry$users[[email_hash]]$failed_attempts <- 0
+
+  save_registry(registry, base_path)
+  invisible(TRUE)
+}
+
+#' Verify user's PIN
+#' @param email User email
+#' @param pin PIN to verify
+#' @param base_path Base path for sessions storage
+#' @return List with success (TRUE/FALSE), locked (TRUE/FALSE), attempts_remaining
+verify_user_pin <- function(email, pin, base_path) {
+  registry <- get_registry(base_path)
+  email_hash <- hash_email(email)
+  user <- registry$users[[email_hash]]
+
+  # Check if user exists
+  if (is.null(user)) {
+    return(list(
+      success = FALSE,
+      locked = FALSE,
+      attempts_remaining = 0,
+      error = "User not found"
+    ))
+  }
+
+  # Check if PIN is set
+  if (is.null(user$pin_hash) || !nzchar(user$pin_hash)) {
+    return(list(
+      success = FALSE,
+      locked = FALSE,
+      attempts_remaining = 0,
+      error = "No PIN set"
+    ))
+  }
+
+  # Check if account is locked (5+ failed attempts)
+  failed_attempts <- user$failed_attempts %||% 0
+  if (failed_attempts >= 5) {
+    # Check if lock has expired (30 minutes)
+    last_attempt <- user$last_failed_attempt
+    if (!is.null(last_attempt)) {
+      lock_time <- as.POSIXct(
+        last_attempt,
+        format = "%Y-%m-%dT%H:%M:%SZ",
+        tz = "UTC"
+      )
+      if (difftime(Sys.time(), lock_time, units = "mins") < 30) {
+        mins_remaining <- ceiling(
+          30 - as.numeric(difftime(Sys.time(), lock_time, units = "mins"))
+        )
+        return(list(
+          success = FALSE,
+          locked = TRUE,
+          attempts_remaining = 0,
+          error = paste(
+            "Account locked. Try again in",
+            mins_remaining,
+            "minutes."
+          )
+        ))
+      } else {
+        # Lock expired, reset attempts
+        failed_attempts <- 0
+      }
+    }
+  }
+
+  # Verify PIN
+  if (verify_pin(pin, user$pin_hash, email_hash)) {
+    # Success - reset failed attempts
+    registry$users[[email_hash]]$failed_attempts <- 0
+    registry$users[[email_hash]]$last_login <- format(
+      Sys.time(),
+      "%Y-%m-%dT%H:%M:%SZ"
+    )
+    save_registry(registry, base_path)
+    return(list(success = TRUE, locked = FALSE, attempts_remaining = 5))
+  } else {
+    # Failed - increment attempts
+    failed_attempts <- failed_attempts + 1
+    registry$users[[email_hash]]$failed_attempts <- failed_attempts
+    registry$users[[email_hash]]$last_failed_attempt <- format(
+      Sys.time(),
+      "%Y-%m-%dT%H:%M:%SZ"
+    )
+    save_registry(registry, base_path)
+
+    attempts_remaining <- max(0, 5 - failed_attempts)
+    locked <- failed_attempts >= 5
+
+    return(list(
+      success = FALSE,
+      locked = locked,
+      attempts_remaining = attempts_remaining,
+      error = if (locked) {
+        "Account locked for 30 minutes"
+      } else {
+        paste("Incorrect PIN.", attempts_remaining, "attempts remaining")
+      }
+    ))
+  }
+}
+
+#' Reset user's failed login attempts (for admin use)
+#' @param email User email
+#' @param base_path Base path for sessions storage
+reset_failed_attempts <- function(email, base_path) {
+  registry <- get_registry(base_path)
+  email_hash <- hash_email(email)
+
+  if (!is.null(registry$users[[email_hash]])) {
+    registry$users[[email_hash]]$failed_attempts <- 0
+    registry$users[[email_hash]]$last_failed_attempt <- NULL
+    save_registry(registry, base_path)
+  }
+
+  invisible(TRUE)
 }
 
 #' Validate email format
 #' @param email Email string to validate
 #' @return TRUE if valid email format
 is_valid_email <- function(email) {
-
-  if (is.null(email) || is.na(email) || email == "") return(FALSE)
+  if (is.null(email) || is.na(email) || email == "") {
+    return(FALSE)
+  }
   grepl("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$", email)
 }
 
@@ -71,14 +271,17 @@ is_valid_email <- function(email) {
 #' @return List containing registry data
 get_registry <- function(base_path) {
   registry_file <- file.path(base_path, "registry.json")
-  
+
   if (file.exists(registry_file)) {
-    tryCatch({
-      jsonlite::fromJSON(registry_file, simplifyVector = FALSE)
-    }, error = function(e) {
-      warning("Failed to read registry, creating new: ", e$message)
-      create_empty_registry()
-    })
+    tryCatch(
+      {
+        jsonlite::fromJSON(registry_file, simplifyVector = FALSE)
+      },
+      error = function(e) {
+        warning("Failed to read registry, creating new: ", e$message)
+        create_empty_registry()
+      }
+    )
   } else {
     create_empty_registry()
   }
@@ -100,17 +303,17 @@ create_empty_registry <- function() {
 #' @param base_path Base path for sessions storage
 save_registry <- function(registry, base_path) {
   registry_file <- file.path(base_path, "registry.json")
-  
+
   # Ensure directory exists
   if (!dir.exists(base_path)) {
     dir.create(base_path, recursive = TRUE)
   }
-  
+
   # Write with pretty formatting
   jsonlite::write_json(
-    registry, 
-    registry_file, 
-    pretty = TRUE, 
+    registry,
+    registry_file,
+    pretty = TRUE,
     auto_unbox = TRUE,
     null = "null"
   )
@@ -131,8 +334,12 @@ get_user_session_dir <- function(base_path, email, app_name) {
 #' @return Unique session ID string
 generate_session_id <- function(app_name) {
   prefix <- DEFAULT_SETTINGS$session_prefix[[app_name]] %||% "sess_"
-  paste0(prefix, format(Sys.time(), "%Y%m%d%H%M%S"), "_", 
-         substr(digest::digest(runif(1)), 1, 8))
+  paste0(
+    prefix,
+    format(Sys.time(), "%Y%m%d%H%M%S"),
+    "_",
+    substr(digest::digest(runif(1)), 1, 8)
+  )
 }
 
 # =============================================================================
@@ -143,16 +350,14 @@ generate_session_id <- function(app_name) {
 #' @param id Module namespace ID
 #' @return Shiny UI elements
 userSessionsUI <- function(id) {
-
-
   ns <- NS(id)
-  
+
   tagList(
     # User identification section
     div(
       id = ns("user_section"),
       class = "user-session-panel",
-      
+
       # Email input with validation
       div(
         class = "mb-3",
@@ -164,18 +369,18 @@ userSessionsUI <- function(id) {
         ),
         uiOutput(ns("email_status"))
       ),
-      
+
       # Session selection (shown after email validated)
       conditionalPanel(
         condition = sprintf("output['%s']", ns("user_authenticated")),
-        
+
         hr(),
-        
+
         # Current session info
         uiOutput(ns("current_session_info")),
-        
+
         hr(),
-        
+
         # Session actions
         div(
           class = "d-flex gap-2 flex-wrap",
@@ -200,9 +405,10 @@ userSessionsUI <- function(id) {
         )
       )
     ),
-    
+
     # CSS for the panel
-    tags$style(HTML(sprintf("
+    tags$style(HTML(sprintf(
+      "
       #%s {
         padding: 15px;
         background: #f8f9fa;
@@ -214,7 +420,9 @@ userSessionsUI <- function(id) {
         padding: 2px 8px;
         border-radius: 4px;
       }
-    ", ns("user_section"))))
+    ",
+      ns("user_section")
+    )))
   )
 }
 
@@ -230,21 +438,20 @@ userSessionsUI <- function(id) {
 #' @param on_session_load Callback function when session is loaded
 #' @return List with reactive values and functions
 userSessionsServer <- function(
-  id, 
+  id,
 
   app_name,
   base_path = "shared/sessions",
   get_session_data = NULL,
   on_session_load = NULL
 ) {
-  
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
-    
+
     # =========================================================================
     # REACTIVE VALUES
     # =========================================================================
-    
+
     user_rv <- reactiveValues(
       email = NULL,
       email_hash = NULL,
@@ -253,81 +460,85 @@ userSessionsServer <- function(
       session_data = NULL,
       sessions_list = list()
     )
-    
+
     # =========================================================================
     # EMAIL VALIDATION & USER SETUP
     # =========================================================================
-    
+
     # Debounced email validation
     email_debounced <- debounce(reactive(input$user_email), 500)
-    
+
     observe({
       email <- email_debounced()
-      
+
       if (is_valid_email(email)) {
         user_rv$email <- tolower(trimws(email))
         user_rv$email_hash <- hash_email(user_rv$email)
         user_rv$authenticated <- TRUE
-        
+
         # Ensure user directory exists
         user_dir <- get_user_session_dir(base_path, user_rv$email, app_name)
         if (!dir.exists(user_dir)) {
           dir.create(user_dir, recursive = TRUE)
         }
-        
+
         # Register user if new
         register_user(user_rv$email, base_path)
-        
+
         # Load user's session list
         user_rv$sessions_list <- get_user_sessions(
-          user_rv$email, 
-          app_name, 
+          user_rv$email,
+          app_name,
           base_path
         )
-        
       } else {
         user_rv$authenticated <- FALSE
       }
     })
-    
+
     # Email status indicator
     output$email_status <- renderUI({
       email <- input$user_email
-      
+
       if (is.null(email) || email == "") {
         return(NULL)
       }
-      
+
       if (is_valid_email(email)) {
         span(
           class = "text-success small",
-          icon("check-circle"), " Valid email"
+          icon("check-circle"),
+          " Valid email"
         )
       } else {
         span(
           class = "text-danger small",
-          icon("exclamation-circle"), " Please enter a valid email"
+          icon("exclamation-circle"),
+          " Please enter a valid email"
         )
       }
     })
-    
+
     # Authentication flag for conditional panel
     output$user_authenticated <- reactive({
       user_rv$authenticated
     })
     outputOptions(output, "user_authenticated", suspendWhenHidden = FALSE)
-    
+
     # =========================================================================
     # CURRENT SESSION DISPLAY
     # =========================================================================
-    
+
     output$current_session_info <- renderUI({
-      if (!user_rv$authenticated) return(NULL)
-      
+      if (!user_rv$authenticated) {
+        return(NULL)
+      }
+
       if (is.null(user_rv$current_session_id)) {
         div(
           class = "text-muted small",
-          icon("info-circle"), " No active session. Create a new one or load an existing session."
+          icon("info-circle"),
+          " No active session. Create a new one or load an existing session."
         )
       } else {
         div(
@@ -338,49 +549,50 @@ userSessionsServer <- function(
           if (!is.null(user_rv$session_data$file_name)) {
             p(
               class = "small text-muted mb-0",
-              strong("File: "), user_rv$session_data$file_name
+              strong("File: "),
+              user_rv$session_data$file_name
             )
           }
         )
       }
     })
-    
+
     # =========================================================================
     # SESSION ACTIONS
     # =========================================================================
-    
+
     # New Session
     observeEvent(input$new_session, {
       req(user_rv$authenticated)
-      
+
       user_rv$current_session_id <- generate_session_id(app_name)
       user_rv$session_data <- list(
         created = Sys.time(),
         updated = Sys.time()
       )
-      
+
       showNotification(
         paste("New session created:", user_rv$current_session_id),
         type = "message",
         duration = 3
       )
     })
-    
+
     # Load Session Modal
     observeEvent(input$load_session, {
       req(user_rv$authenticated)
-      
+
       # Refresh sessions list
       user_rv$sessions_list <- get_user_sessions(
-        user_rv$email, 
-        app_name, 
+        user_rv$email,
+        app_name,
         base_path
       )
-      
+
       showModal(modalDialog(
         title = "Load Session",
         size = "l",
-        
+
         if (length(user_rv$sessions_list) == 0) {
           div(
             class = "text-center text-muted py-4",
@@ -389,8 +601,7 @@ userSessionsServer <- function(
           )
         } else {
           tagList(
-            p(class = "text-muted", 
-              "Select a session to load:"),
+            p(class = "text-muted", "Select a session to load:"),
             div(
               style = "max-height: 400px; overflow-y: auto;",
               lapply(seq_along(user_rv$sessions_list), function(i) {
@@ -421,14 +632,17 @@ userSessionsServer <- function(
                           span(class = "badge bg-success me-1", "PCA")
                         },
                         if (isTRUE(sess$has_annotations)) {
-                          span(class = "badge bg-info me-1", "Annotated
-")
+                          span(
+                            class = "badge bg-info me-1",
+                            "Annotated
+"
+                          )
                         },
                         br(),
                         small(
                           class = "text-muted",
                           format(
-                            as.POSIXct(sess$updated), 
+                            as.POSIXct(sess$updated),
                             "%Y-%m-%d %H:%M"
                           )
                         )
@@ -440,71 +654,74 @@ userSessionsServer <- function(
             )
           )
         },
-        
+
         footer = modalButton("Cancel"),
         easyClose = TRUE
       ))
     })
-    
+
     # Handle session selection
     observeEvent(input$select_session, {
       req(user_rv$authenticated)
       session_id <- input$select_session
-      
-      tryCatch({
-        session_file <- file.path(
-          get_user_session_dir(base_path, user_rv$email, app_name),
-          paste0(session_id, ".rds")
-        )
-        
-        if (file.exists(session_file)) {
-          loaded_data <- readRDS(session_file)
-          user_rv$current_session_id <- session_id
-          user_rv$session_data <- loaded_data
-          
-          # Call the callback if provided
-          if (!is.null(on_session_load) && is.function(on_session_load)) {
-            on_session_load(loaded_data)
-          }
-          
-          removeModal()
-          showNotification(
-            paste("Session loaded:", session_id),
-            type = "message",
-            duration = 3
+
+      tryCatch(
+        {
+          session_file <- file.path(
+            get_user_session_dir(base_path, user_rv$email, app_name),
+            paste0(session_id, ".rds")
           )
-        } else {
+
+          if (file.exists(session_file)) {
+            loaded_data <- readRDS(session_file)
+            user_rv$current_session_id <- session_id
+            user_rv$session_data <- loaded_data
+
+            # Call the callback if provided
+            if (!is.null(on_session_load) && is.function(on_session_load)) {
+              on_session_load(loaded_data)
+            }
+
+            removeModal()
+            showNotification(
+              paste("Session loaded:", session_id),
+              type = "message",
+              duration = 3
+            )
+          } else {
+            showNotification(
+              "Session file not found",
+              type = "error",
+              duration = 5
+            )
+          }
+        },
+        error = function(e) {
           showNotification(
-            "Session file not found",
+            paste("Failed to load session:", e$message),
             type = "error",
             duration = 5
           )
         }
-      }, error = function(e) {
-        showNotification(
-          paste("Failed to load session:", e$message),
-          type = "error",
-          duration = 5
-        )
-      })
+      )
     })
-    
+
     # Save Session
     observeEvent(input$save_session, {
       req(user_rv$authenticated)
-      
+
       # Create new session ID if none exists
       if (is.null(user_rv$current_session_id)) {
         user_rv$current_session_id <- generate_session_id(app_name)
       }
-      
+
       # Get current data from callback
       if (!is.null(get_session_data) && is.function(get_session_data)) {
         save_data <- get_session_data()
       } else {
         save_data <- user_rv$session_data
       }
-      
+
       if (is.null(save_data)) {
         showNotification(
           "No data to save",
@@ -513,72 +730,83 @@ userSessionsServer <- function(
         )
         return()
       }
-      
-      tryCatch({
-        # Add metadata
-        save_data$session_id <- user_rv$current_session_id
-        save_data$user_email <- user_rv$email
-        save_data$app_name <- app_name
-        save_data$updated <- Sys.time()
-        if (is.null(save_data$created)) {
-          save_data$created <- Sys.time()
+
+      tryCatch(
+        {
+          # Add metadata
+          save_data$session_id <- user_rv$current_session_id
+          save_data$user_email <- user_rv$email
+          save_data$app_name <- app_name
+          save_data$updated <- Sys.time()
+          if (is.null(save_data$created)) {
+            save_data$created <- Sys.time()
+          }
+
+          # Save RDS file
+          session_dir <- get_user_session_dir(
+            base_path,
+            user_rv$email,
+            app_name
+          )
+          if (!dir.exists(session_dir)) {
+            dir.create(session_dir, recursive = TRUE)
+          }
+
+          session_file <- file.path(
+            session_dir,
+            paste0(user_rv$current_session_id, ".rds")
+          )
+          saveRDS(save_data, session_file)
+
+          # Update registry
+          update_session_registry(
+            email = user_rv$email,
+            app_name = app_name,
+            session_info = list(
+              session_id = user_rv$current_session_id,
+              created = format(save_data$created, "%Y-%m-%dT%H:%M:%SZ"),
+              updated = format(save_data$updated, "%Y-%m-%dT%H:%M:%SZ"),
+              file_name = save_data$file_name %||%
+                save_data$file_data$file_name,
+              samples = if (!is.null(save_data$file_data$metadata)) {
+                nrow(save_data$file_data$metadata)
+              } else {
+                NULL
+              },
+              groups = if (!is.null(save_data$file_data$metadata$group)) {
+                unique(as.character(save_data$file_data$metadata$group))
+              } else {
+                NULL
+              },
+              has_pca = !is.null(save_data$current_edits$pca),
+              has_annotations = !is.null(save_data$current_edits$annotation),
+              status = "complete"
+            ),
+            base_path = base_path
+          )
+
+          user_rv$session_data <- save_data
+
+          showNotification(
+            paste("Session saved:", user_rv$current_session_id),
+            type = "message",
+            duration = 3
+          )
+        },
+        error = function(e) {
+          showNotification(
+            paste("Failed to save session:", e$message),
+            type = "error",
+            duration = 5
+          )
         }
-        
-        # Save RDS file
-        session_dir <- get_user_session_dir(base_path, user_rv$email, app_name)
-        if (!dir.exists(session_dir)) {
-          dir.create(session_dir, recursive = TRUE)
-        }
-        
-        session_file <- file.path(
-          session_dir, 
-          paste0(user_rv$current_session_id, ".rds")
-        )
-        saveRDS(save_data, session_file)
-        
-        # Update registry
-        update_session_registry(
-          email = user_rv$email,
-          app_name = app_name,
-          session_info = list(
-            session_id = user_rv$current_session_id,
-            created = format(save_data$created, "%Y-%m-%dT%H:%M:%SZ"),
-            updated = format(save_data$updated, "%Y-%m-%dT%H:%M:%SZ"),
-            file_name = save_data$file_name %||% save_data$file_data$file_name,
-            samples = if (!is.null(save_data$file_data$metadata)) {
-              nrow(save_data$file_data$metadata)
-            } else NULL,
-            groups = if (!is.null(save_data$file_data$metadata$group)) {
-              unique(as.character(save_data$file_data$metadata$group))
-            } else NULL,
-            has_pca = !is.null(save_data$current_edits$pca),
-            has_annotations = !is.null(save_data$current_edits$annotation),
-            status = "complete"
-          ),
-          base_path = base_path
-        )
-        
-        user_rv$session_data <- save_data
-        
-        showNotification(
-          paste("Session saved:", user_rv$current_session_id),
-          type = "message",
-          duration = 3
-        )
-        
-      }, error = function(e) {
-        showNotification(
-          paste("Failed to save session:", e$message),
-          type = "error",
-          duration = 5
-        )
-      })
+      )
     })
-    
+
     # =========================================================================
     # RETURN MODULE API
     # =========================================================================
-    
+
     return(list(
       # Reactive values
       email = reactive(user_rv$email),
@@ -587,24 +815,28 @@ userSessionsServer <- function(
       current_session_id = reactive(user_rv$current_session_id),
       session_data = reactive(user_rv$session_data),
       sessions_list = reactive(user_rv$sessions_list),
-      
+
       # Functions
       save_session = function(data) {
         user_rv$session_data <- data
         shinyjs::click(ns("save_session"))
       },
-      
+
       set_session_id = function(id) {
         user_rv$current_session_id <- id
       },
-      
+
       get_upstream_sessions = function(upstream_app) {
-        if (!user_rv$authenticated) return(list())
+        if (!user_rv$authenticated) {
+          return(list())
+        }
         get_user_sessions(user_rv$email, upstream_app, base_path)
       },
-      
+
       load_upstream_session = function(upstream_app, session_id) {
-        if (!user_rv$authenticated) return(NULL)
+        if (!user_rv$authenticated) {
+          return(NULL)
+        }
         session_file <- file.path(
           get_user_session_dir(base_path, user_rv$email, upstream_app),
           paste0(session_id, ".rds")
@@ -629,7 +861,7 @@ userSessionsServer <- function(
 register_user <- function(email, base_path) {
   registry <- get_registry(base_path)
   email_hash <- hash_email(email)
-  
+
   if (is.null(registry$users[[email_hash]])) {
     registry$users[[email_hash]] <- list(
       email = email,
@@ -638,7 +870,7 @@ register_user <- function(email, base_path) {
     )
     save_registry(registry, base_path)
   }
-  
+
   invisible(TRUE)
 }
 
@@ -650,19 +882,23 @@ register_user <- function(email, base_path) {
 get_user_sessions <- function(email, app_name, base_path) {
   registry <- get_registry(base_path)
   email_hash <- hash_email(email)
-  
+
   user_data <- registry$users[[email_hash]]
-  if (is.null(user_data)) return(list())
-  
+  if (is.null(user_data)) {
+    return(list())
+  }
+
   sessions <- user_data$apps[[app_name]]
-  if (is.null(sessions)) return(list())
-  
+  if (is.null(sessions)) {
+    return(list())
+  }
+
   # Sort by updated date descending
   sessions <- sessions[order(
     sapply(sessions, function(x) x$updated %||% x$created),
     decreasing = TRUE
   )]
-  
+
   sessions
 }
 
@@ -674,35 +910,41 @@ get_user_sessions <- function(email, app_name, base_path) {
 update_session_registry <- function(email, app_name, session_info, base_path) {
   registry <- get_registry(base_path)
   email_hash <- hash_email(email)
-  
+
   # Ensure user exists
   if (is.null(registry$users[[email_hash]])) {
     register_user(email, base_path)
     registry <- get_registry(base_path)
   }
-  
+
   # Ensure app list exists
   if (is.null(registry$users[[email_hash]]$apps[[app_name]])) {
     registry$users[[email_hash]]$apps[[app_name]] <- list()
   }
-  
+
   # Find existing session or add new
   sessions <- registry$users[[email_hash]]$apps[[app_name]]
-  
+
   # Handle empty sessions list
   if (length(sessions) == 0) {
     existing_idx <- integer(0)
   } else {
     # Use vapply for type safety - returns logical vector
-    matches <- vapply(sessions, function(x) {
-      identical(x$session_id, session_info$session_id)
-    }, logical(1))
+    matches <- vapply(
+      sessions,
+      function(x) {
+        identical(x$session_id, session_info$session_id)
+      },
+      logical(1)
+    )
     existing_idx <- which(matches)
   }
-  
+
   if (length(existing_idx) > 0) {
     # Update existing
-    registry$users[[email_hash]]$apps[[app_name]][[existing_idx[1]]] <- session_info
+    registry$users[[email_hash]]$apps[[app_name]][[existing_idx[
+      1
+    ]]] <- session_info
   } else {
     # Add new
     registry$users[[email_hash]]$apps[[app_name]] <- c(
@@ -710,7 +952,7 @@ update_session_registry <- function(email, app_name, session_info, base_path) {
       list(session_info)
     )
   }
-  
+
   save_registry(registry, base_path)
   invisible(TRUE)
 }
@@ -721,7 +963,7 @@ update_session_registry <- function(email, app_name, session_info, base_path) {
 #' @param session_id Session ID to delete
 #' @param base_path Base path for sessions storage
 delete_session <- function(email, app_name, session_id, base_path) {
- # Delete file
+  # Delete file
   session_file <- file.path(
     get_user_session_dir(base_path, email, app_name),
     paste0(session_id, ".rds")
@@ -729,7 +971,7 @@ delete_session <- function(email, app_name, session_id, base_path) {
   if (file.exists(session_file)) {
     file.remove(session_file)
   }
-  
+
   # Log the deletion
   log_session_activity(
     base_path = base_path,
@@ -738,30 +980,34 @@ delete_session <- function(email, app_name, session_id, base_path) {
     app_name = app_name,
     action = "deleted"
   )
-  
+
   # Remove from registry
   registry <- get_registry(base_path)
   email_hash <- hash_email(email)
-  
+
   if (!is.null(registry$users[[email_hash]]$apps[[app_name]])) {
     sessions <- registry$users[[email_hash]]$apps[[app_name]]
-    
+
     # Handle empty sessions list
     if (length(sessions) == 0) {
       # Nothing to delete
       return(invisible(TRUE))
     }
-    
+
     # Use vapply for type safety
-    keep_matches <- vapply(sessions, function(x) {
-      !identical(x$session_id, session_id)
-    }, logical(1))
+    keep_matches <- vapply(
+      sessions,
+      function(x) {
+        !identical(x$session_id, session_id)
+      },
+      logical(1)
+    )
     keep_idx <- which(keep_matches)
-    
+
     registry$users[[email_hash]]$apps[[app_name]] <- sessions[keep_idx]
     save_registry(registry, base_path)
   }
-  
+
   invisible(TRUE)
 }
 
@@ -782,7 +1028,7 @@ delete_session <- function(email, app_name, session_id, base_path) {
 log_session_activity <- function(
   base_path,
   email,
- session_id,
+  session_id,
   app_name,
   action,
   file_name = NA,
@@ -790,41 +1036,44 @@ log_session_activity <- function(
   has_pca = NA,
   has_annotations = NA
 ) {
-  tryCatch({
-    log_file <- file.path(base_path, "session_activity_log.csv")
-    
-    # Create log entry
-    log_entry <- data.frame(
-      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-      email = email,
-      email_hash = hash_email(email),
-      session_id = session_id,
-      app_name = app_name,
-      action = action,
-      file_name = as.character(file_name),
-      samples = as.integer(samples),
-      has_pca = as.logical(has_pca),
-      has_annotations = as.logical(has_annotations),
-      stringsAsFactors = FALSE
-    )
-    
-    # Append to CSV (create with header if doesn't exist)
-    write_header <- !file.exists(log_file)
-    write.table(
-      log_entry,
-      file = log_file,
-      sep = ",",
-      row.names = FALSE,
-      col.names = write_header,
-      append = !write_header,
-      quote = TRUE
-    )
-    
-    invisible(TRUE)
-  }, error = function(e) {
-    warning("Failed to log session activity: ", e$message)
-    invisible(FALSE)
-  })
+  tryCatch(
+    {
+      log_file <- file.path(base_path, "session_activity_log.csv")
+
+      # Create log entry
+      log_entry <- data.frame(
+        timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+        email = email,
+        email_hash = hash_email(email),
+        session_id = session_id,
+        app_name = app_name,
+        action = action,
+        file_name = as.character(file_name),
+        samples = as.integer(samples),
+        has_pca = as.logical(has_pca),
+        has_annotations = as.logical(has_annotations),
+        stringsAsFactors = FALSE
+      )
+
+      # Append to CSV (create with header if doesn't exist)
+      write_header <- !file.exists(log_file)
+      write.table(
+        log_entry,
+        file = log_file,
+        sep = ",",
+        row.names = FALSE,
+        col.names = write_header,
+        append = !write_header,
+        quote = TRUE
+      )
+
+      invisible(TRUE)
+    },
+    error = function(e) {
+      warning("Failed to log session activity: ", e$message)
+      invisible(FALSE)
+    }
+  )
 }
 
 #' Read session activity log
@@ -832,7 +1081,7 @@ log_session_activity <- function(
 #' @return Data frame of all activity, or empty data frame if no log exists
 read_session_log <- function(base_path) {
   log_file <- file.path(base_path, "session_activity_log.csv")
-  
+
   if (!file.exists(log_file)) {
     return(data.frame(
       timestamp = character(),
@@ -848,13 +1097,16 @@ read_session_log <- function(base_path) {
       stringsAsFactors = FALSE
     ))
   }
-  
-  tryCatch({
-    read.csv(log_file, stringsAsFactors = FALSE)
-  }, error = function(e) {
-    warning("Failed to read session log: ", e$message)
-    data.frame()
-  })
+
+  tryCatch(
+    {
+      read.csv(log_file, stringsAsFactors = FALSE)
+    },
+    error = function(e) {
+      warning("Failed to read session log: ", e$message)
+      data.frame()
+    }
+  )
 }
 
 #' Get summary of all users and sessions
@@ -862,7 +1114,7 @@ read_session_log <- function(base_path) {
 #' @return Data frame with user summary
 get_users_summary <- function(base_path) {
   registry <- get_registry(base_path)
-  
+
   if (length(registry$users) == 0) {
     return(data.frame(
       email = character(),
@@ -873,15 +1125,15 @@ get_users_summary <- function(base_path) {
       stringsAsFactors = FALSE
     ))
   }
-  
+
   # Build summary from registry
   summary_list <- lapply(names(registry$users), function(hash) {
     user <- registry$users[[hash]]
-    
+
     # Count sessions across all apps
     total_sessions <- sum(sapply(user$apps, length))
     apps_used <- paste(names(user$apps), collapse = ", ")
-    
+
     data.frame(
       email = user$email,
       email_hash = hash,
@@ -891,7 +1143,7 @@ get_users_summary <- function(base_path) {
       stringsAsFactors = FALSE
     )
   })
-  
+
   do.call(rbind, summary_list)
 }
 
@@ -900,7 +1152,7 @@ get_users_summary <- function(base_path) {
 #' @return Data frame with all sessions
 get_all_sessions <- function(base_path) {
   registry <- get_registry(base_path)
-  
+
   if (length(registry$users) == 0) {
     return(data.frame(
       email = character(),
@@ -916,13 +1168,13 @@ get_all_sessions <- function(base_path) {
       stringsAsFactors = FALSE
     ))
   }
-  
+
   # Build sessions table from registry
   sessions_list <- list()
-  
+
   for (hash in names(registry$users)) {
     user <- registry$users[[hash]]
-    
+
     for (app_name in names(user$apps)) {
       for (sess in user$apps[[app_name]]) {
         sessions_list[[length(sessions_list) + 1]] <- data.frame(
@@ -941,7 +1193,7 @@ get_all_sessions <- function(base_path) {
       }
     }
   }
-  
+
   if (length(sessions_list) == 0) {
     return(data.frame(
       email = character(),
@@ -957,7 +1209,7 @@ get_all_sessions <- function(base_path) {
       stringsAsFactors = FALSE
     ))
   }
-  
+
   do.call(rbind, sessions_list)
 }
 
@@ -975,7 +1227,7 @@ sendToAppButton <- function(id, target_app, session_id, base_url = NULL) {
   # Format app name for display
   app_display <- gsub("-", " ", target_app)
   app_display <- tools::toTitleCase(app_display)
-  
+
   if (!is.null(base_url)) {
     # External link with session ID as parameter
     url <- paste0(base_url, "?session=", session_id)
@@ -983,7 +1235,7 @@ sendToAppButton <- function(id, target_app, session_id, base_url = NULL) {
       href = url,
       target = "_blank",
       class = "btn btn-primary btn-sm",
-      icon("arrow-right"), 
+      icon("arrow-right"),
       paste("Open in", app_display)
     )
   } else {
