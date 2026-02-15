@@ -966,9 +966,37 @@ ui <- function(request) {
             }
           });
           
+          // FIX: Modal scroll lock issue
+          // Bootstrap modals add overflow:hidden to body, but sometimes don't remove it
+          $(document).on('hidden.bs.modal', '.modal', function() {
+            // Check if any other modals are still open
+            if ($('.modal:visible').length === 0) {
+              $('body').removeClass('modal-open');
+              $('body').css('overflow', '');
+              $('body').css('padding-right', '');
+              $('.modal-backdrop').remove();
+            }
+          });
+          
+          // Also fix on Shiny modal close
+          $(document).on('shiny:modal-hidden', function(event) {
+            setTimeout(function() {
+              $('body').removeClass('modal-open');
+              $('body').css('overflow', '');
+              $('body').css('padding-right', '');
+              $('.modal-backdrop').remove();
+            }, 100);
+          });
+          
           // Force UI refresh handler - fixes scroll freezing issues
           Shiny.addCustomMessageHandler('forceUIRefresh', function(msg) {
             console.log('Forcing UI refresh...');
+            
+            // Fix modal-related scroll lock
+            $('body').removeClass('modal-open');
+            $('body').css('overflow', '');
+            $('body').css('padding-right', '');
+            $('.modal-backdrop').remove();
             
             // Reset scroll position on all scrollable elements
             $('html, body').scrollTop(0);
